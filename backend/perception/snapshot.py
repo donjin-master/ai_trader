@@ -60,20 +60,48 @@ class MarketSnapshot:
             return "trending_down"
         return "ranging"
 
-    async def build_snapshot(self, instrument: str) -> dict:
+    async def build_snapshot(self, instrument: str, cache: Any = None) -> dict:
         ticker: dict[str, Any] = {}
         orderbook: dict[str, Any] = {}
-        try:
-            ticker = await self.delta.get_ticker(instrument)
-        except Exception as exc:
-            logger.error("Failed to fetch ticker for {}: {}", instrument, exc)
-        try:
-            orderbook = await self.delta.get_orderbook(instrument, depth=5)
-        except Exception as exc:
-            logger.warning("Failed to fetch orderbook for {}: {}", instrument, exc)
+        fear_greed: dict[str, Any] = {}
+        dominance: dict[str, Any] = {}
 
-        fear_greed = await self._fetch_fear_greed()
-        dominance = await self._fetch_btc_dominance()
+        if cache is not None:
+            try:
+                ticker = await cache.get("ticker")
+            except Exception as exc:
+                logger.error("Failed to fetch cached ticker for {}: {}", instrument, exc)
+            try:
+                orderbook = await cache.get("orderbook")
+            except Exception as exc:
+                logger.warning("Failed to fetch cached orderbook for {}: {}", instrument, exc)
+            try:
+                fg_data = await cache.get("fear_greed")
+                fear_greed = {
+                    "fear_greed_index": fg_data.get("value") if fg_data else None,
+                    "fear_greed_classification": fg_data.get("classification") if fg_data else None,
+                }
+            except Exception as exc:
+                logger.warning("Failed to fetch cached fear_greed: {}", exc)
+                fear_greed = {"fear_greed_index": None, "fear_greed_classification": None}
+            try:
+                btc_dom = await cache.get("btc_dominance")
+                dominance = {"btc_dominance": round(float(btc_dom), 2) if btc_dom is not None else None}
+            except Exception as exc:
+                logger.warning("Failed to fetch cached btc_dominance: {}", exc)
+                dominance = {"btc_dominance": None}
+        else:
+            try:
+                ticker = await self.delta.get_ticker(instrument)
+            except Exception as exc:
+                logger.error("Failed to fetch ticker for {}: {}", instrument, exc)
+            try:
+                orderbook = await self.delta.get_orderbook(instrument, depth=5)
+            except Exception as exc:
+                logger.warning("Failed to fetch orderbook for {}: {}", instrument, exc)
+
+            fear_greed = await self._fetch_fear_greed()
+            dominance = await self._fetch_btc_dominance()
 
         price = _to_float(ticker.get("close") or ticker.get("spot_price"))
         open_24h = _to_float(ticker.get("open"))
@@ -114,3 +142,4 @@ class MarketSnapshot:
             instrument, price, snapshot["market_regime"],
         )
         return snapshot
+

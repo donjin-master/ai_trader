@@ -5,10 +5,7 @@ import { format } from "date-fns";
 import type { Trade } from "@/lib/api";
 import { cn, formatDuration, formatPct, pnlColor } from "@/lib/utils";
 
-function Stars({ score }: { score: number | undefined }) {
-  const n = Math.round(((score ?? 0) / 10) * 5);
-  return <span className="text-amber-400">{"★".repeat(n)}{"☆".repeat(5 - n)}</span>;
-}
+// Stars component removed to show score out of 10 instead
 
 function Section({
   title,
@@ -103,13 +100,13 @@ function BoardroomMemberRow({ v }: { v: any }) {
     <div className="py-2 first:pt-1 last:pb-1">
       <div 
         onClick={() => setOpen(!open)}
-        className="flex flex-wrap items-start gap-3 cursor-pointer hover:bg-zinc-800/30 p-1.5 rounded transition-colors"
+        className="flex items-start gap-2 cursor-pointer hover:bg-zinc-800/30 p-1.5 rounded transition-colors"
       >
-        <span className="w-64 font-mono font-bold text-zinc-300 flex items-center gap-1.5 shrink-0">
-          <span className="text-zinc-500 text-[10px]">{open ? "▼" : "▶"}</span>
-          <span className="capitalize">{role}</span>
-          <span className="text-[10px] font-normal text-zinc-500">({modelName})</span>
-        </span>
+        <span className="text-zinc-500 text-[10px] mt-0.5 shrink-0">{open ? "▼" : "▶"}</span>
+        <div className="flex flex-col gap-0.5 shrink-0 w-36">
+          <span className="font-mono font-bold text-zinc-200 text-xs capitalize">{role}</span>
+          <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded w-fit">{modelName}</span>
+        </div>
         <span className={cn(
           "rounded px-2 py-0.5 font-bold text-[10px] tracking-wide uppercase shrink-0",
           v.vote.includes("LONG") ? "bg-green-500/15 text-green-400"
@@ -119,7 +116,7 @@ function BoardroomMemberRow({ v }: { v: any }) {
         <span className="bg-amber-500/10 text-amber-400 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
           {Math.round(v.conviction || 0)}/10
         </span>
-        <span className="text-zinc-500 text-xs flex-1 break-words">
+        <span className="text-zinc-500 text-xs flex-1 min-w-0 overflow-hidden line-clamp-2">
           {v.primary_reason}
         </span>
       </div>
@@ -166,13 +163,13 @@ function BoardroomDeliberationRow({ d, votes }: { d: any; votes?: any[] }) {
     <div className="py-2 first:pt-1 last:pb-1">
       <div 
         onClick={() => setOpen(!open)}
-        className="flex flex-wrap items-start gap-3 cursor-pointer hover:bg-zinc-800/30 p-1.5 rounded transition-colors"
+        className="flex items-start gap-2 cursor-pointer hover:bg-zinc-800/30 p-1.5 rounded transition-colors"
       >
-        <span className="w-64 font-mono font-bold text-zinc-300 flex items-center gap-1.5 shrink-0">
-          <span className="text-zinc-500 text-[10px]">{open ? "▼" : "▶"}</span>
-          <span className="capitalize">{role}</span>
-          <span className="text-[10px] font-normal text-zinc-500">({modelName})</span>
-        </span>
+        <span className="text-zinc-500 text-[10px] mt-0.5 shrink-0">{open ? "▼" : "▶"}</span>
+        <div className="flex flex-col gap-0.5 shrink-0 w-36">
+          <span className="font-mono font-bold text-zinc-200 text-xs capitalize">{role}</span>
+          <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded w-fit">{modelName}</span>
+        </div>
         <span className="font-bold text-zinc-300 text-xs shrink-0">
           {d.original_vote !== d.final_vote ? `${d.original_vote} → ${d.final_vote}` : d.final_vote}
         </span>
@@ -182,7 +179,7 @@ function BoardroomDeliberationRow({ d, votes }: { d: any; votes?: any[] }) {
         )}>
           {d.original_vote !== d.final_vote ? "Updated" : "Held"}
         </span>
-        <span className="text-zinc-500 text-xs flex-1 break-words">
+        <span className="text-zinc-500 text-xs flex-1 min-w-0 overflow-hidden line-clamp-2">
           {d.reasoning}
         </span>
       </div>
@@ -193,8 +190,7 @@ function BoardroomDeliberationRow({ d, votes }: { d: any; votes?: any[] }) {
         </div>
       )}
     </div>
-  );
-}
+  );}
 
 export default function TradeCard({ trade, index }: { trade: Trade; index: number }) {
   const outcome = outcomeOf(trade);
@@ -267,8 +263,7 @@ export default function TradeCard({ trade, index }: { trade: Trade; index: numbe
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-lg bg-green-500/5 p-3">
             <div className="text-xs font-bold text-green-500">
-              🐂 BULL <Stars score={bull?.conviction !== undefined ? bull.conviction * (10 / 10) : undefined} />
-              {bull?.conviction !== undefined && (
+              🐂 BULL {bull?.conviction !== undefined && (
                 <span className="ml-1 text-zinc-400">({bull.conviction}/10)</span>
               )}
             </div>
@@ -278,8 +273,7 @@ export default function TradeCard({ trade, index }: { trade: Trade; index: numbe
           </div>
           <div className="rounded-lg bg-red-500/5 p-3">
             <div className="text-xs font-bold text-red-500">
-              🐻 BEAR <Stars score={bear?.conviction} />
-              {bear?.conviction !== undefined && (
+              🐻 BEAR {bear?.conviction !== undefined && (
                 <span className="ml-1 text-zinc-400">({bear.conviction}/10)</span>
               )}
             </div>

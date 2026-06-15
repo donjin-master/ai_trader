@@ -189,6 +189,7 @@ export interface Trade {
   pnl_pct: number | null;
   duration_mins: number | null;
   confidence: number | null;
+  boardroom_confidence?: number | null;
   status: string | null;
   exit_trigger: string | null;
   reasoning: string | null;
@@ -236,8 +237,36 @@ export interface Trade {
   smc_summary?: {
     structures?: Record<string, { trend?: string }>;
     premium_discount?: string | null;
+    regime?: string | null;
     confluences_found?: string[];
     missing?: string[];
+  } | null;
+  regime?: string | null;
+  trigger_event_type?: string | null;
+  scenario_simulation?: {
+    simulated?: boolean;
+    direction?: string;
+    entry_price?: number;
+    scenario_a_description?: string;
+    scenario_a_play_out?: string;
+    scenario_a_monitor?: string;
+    scenario_a_invalidation?: string;
+    scenario_b_description?: string;
+    scenario_b_change?: string;
+    scenario_b_adjustment?: string;
+    scenario_c_description?: string;
+    scenario_c_sl_valid?: string;
+    scenario_c_missed_signals?: string;
+    simulation_verdict?: string;
+    biggest_risk?: string;
+  } | null;
+  options_strategy?: {
+    available?: boolean;
+    strategy?: string;
+    dte?: number;
+    reasoning?: string;
+    max_loss_inr?: number;
+    legs?: Array<{ type: string; strike: number; side: string; premium: number }>;
   } | null;
 }
 
@@ -262,7 +291,12 @@ export interface Position {
 
 async function get<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
+    const res = await fetch(`${BASE}${path}`, {
+      cache: "no-store",
+      headers: {
+        "x-api-secret": process.env.NEXT_PUBLIC_FRONTEND_API_SECRET || "",
+      },
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -274,7 +308,10 @@ async function post<T>(path: string, body?: unknown): Promise<T | null> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: {
+        ...(body ? { "Content-Type": "application/json" } : {}),
+        "x-api-secret": process.env.NEXT_PUBLIC_FRONTEND_API_SECRET || "",
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) return null;
@@ -288,7 +325,10 @@ async function put<T>(path: string, body: unknown): Promise<T | null> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-secret": process.env.NEXT_PUBLIC_FRONTEND_API_SECRET || "",
+      },
       body: JSON.stringify(body),
     });
     if (!res.ok) return null;
@@ -298,12 +338,52 @@ async function put<T>(path: string, body: unknown): Promise<T | null> {
   }
 }
 
+export interface AccountSummary {
+  asset: string;
+  available_margin: number;
+  available_balance: number;
+  total_balance: number;
+  raw: Array<{
+    asset_symbol: string;
+    balance: string;
+    available_balance: string;
+    balance_inr: string;
+    available_balance_inr: string;
+  }>;
+}
+
+export interface KeyLevels {
+  instrument: string;
+  price: number;
+  chart_levels: Array<{
+    price: number;
+    label: string;
+    color: string;
+    type: string;
+    distance_pct?: number;
+  }>;
+  prev_day_high: number;
+  prev_day_low: number;
+  nearest_round_above: number;
+  nearest_round_below: number;
+}
+
+export interface PatternStat {
+  pattern_type: string;
+  total_trades: number;
+  win_rate: number;
+  avg_pnl_pct: number;
+  avg_confidence: number;
+}
+
 export const api = {
   status: () => get<Status>("/api/status"),
   snapshot: (instrument: string) => get<Snapshot>(`/api/snapshot/${instrument}`),
+  accountSummary: () => get<AccountSummary>("/api/account/summary"),
+  keyLevels: (instrument: string) => get<KeyLevels>(`/api/key-levels/${instrument}`),
   decisions: (limit = 20) => get<Trade[]>(`/api/decisions?limit=${limit}`),
   decision: (id: string) => get<Trade>(`/api/decisions/${id}`),
-  trades: (limit = 100) => get<Trade[]>(`/api/trades?limit=${limit}`),
+  trades: (limit = 100, offset = 0) => get<Trade[]>(`/api/trades?limit=${limit}&offset=${offset}`),
   lessons: () => get<Lesson[]>("/api/lessons"),
   positions: () => get<Position[]>("/api/positions"),
   kill: () => post<{ kill_switch: boolean }>("/api/kill"),

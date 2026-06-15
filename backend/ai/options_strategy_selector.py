@@ -146,88 +146,79 @@ class OptionsStrategySelector:
     ) -> dict:
         regime = iv_snapshot.get("iv_regime", "NORMAL")
         spot = float(iv_snapshot.get("spot") or 0)
-        strategy = self._pick_strategy(direction, conviction, regime)
-        meta = STRATEGIES[strategy]
         max_loss_budget = total_capital * max_loss_pct / 100
 
         chain, expiry = await self._chain_for_expiry(instrument, dte_min, dte_max)
         if not chain or not spot:
             return {
-                "strategy": strategy, "available": False,
+                "strategy": "none", "available": False,
                 "reason": "no options chain in the preferred DTE window",
-                "meta": meta,
+                "meta": {},
             }
+        
         expiry_str = datetime.fromtimestamp(expiry, tz=timezone.utc).strftime("%d%b%Y").upper()
         dte = round((expiry - datetime.now(timezone.utc).timestamp()) / 86400, 1)
-        move = float(iv_snapshot.get("expected_move_pct") or 2.0) / 100
 
-        legs: list[dict] = []
-        if strategy == "long_call":
-            opt = self._nearest(chain, "call_options", spot)
-            if opt: legs = [{"action": "buy", "type": "call", "strike": self._strike(opt),
-                             "expiry": expiry_str, "quantity": 1, "symbol": opt.get("symbol"),
-                             "mark_price": self._mark(opt)}]
-        elif strategy == "long_put":
-            opt = self._nearest(chain, "put_options", spot)
-            if opt: legs = [{"action": "buy", "type": "put", "strike": self._strike(opt),
-                             "expiry": expiry_str, "quantity": 1, "symbol": opt.get("symbol"),
-                             "mark_price": self._mark(opt)}]
-        elif strategy == "bull_call_spread":
-            lo = self._nearest(chain, "call_options", spot)
-            hi = self._nearest(chain, "call_options", spot * (1 + move))
-            if lo and hi and self._strike(hi) > self._strike(lo):
-                legs = [
-                    {"action": "buy", "type": "call", "strike": self._strike(lo), "expiry": expiry_str,
-                     "quantity": 1, "symbol": lo.get("symbol"), "mark_price": self._mark(lo)},
-                    {"action": "sell", "type": "call", "strike": self._strike(hi), "expiry": expiry_str,
-                     "quantity": 1, "symbol": hi.get("symbol"), "mark_price": self._mark(hi)},
-                ]
-        elif strategy == "bear_put_spread":
-            hi = self._nearest(chain, "put_options", spot)
-            lo = self._nearest(chain, "put_options", spot * (1 - move))
-            if hi and lo and self._strike(lo) < self._strike(hi):
-                legs = [
-                    {"action": "buy", "type": "put", "strike": self._strike(hi), "expiry": expiry_str,
-                     "quantity": 1, "symbol": hi.get("symbol"), "mark_price": self._mark(hi)},
-                    {"action": "sell", "type": "put", "strike": self._strike(lo), "expiry": expiry_str,
-                     "quantity": 1, "symbol": lo.get("symbol"), "mark_price": self._mark(lo)},
-                ]
-        elif strategy in ("short_strangle", "iron_condor"):
-            call = self._nearest(chain, "call_options", spot * (1 + move))
-            put = self._nearest(chain, "put_options", spot * (1 - move))
-            if call and put:
-                legs = [
-                    {"action": "sell", "type": "call", "strike": self._strike(call), "expiry": expiry_str,
-                     "quantity": 1, "symbol": call.get("symbol"), "mark_price": self._mark(call)},
-                    {"action": "sell", "type": "put", "strike": self._strike(put), "expiry": expiry_str,
-                     "quantity": 1, "symbol": put.get("symbol"), "mark_price": self._mark(put)},
-                ]
-                if strategy == "iron_condor":
-                    far_call = self._nearest(chain, "call_options", spot * (1 + 2 * move))
-                    far_put = self._nearest(chain, "put_options", spot * (1 - 2 * move))
-                    if far_call and far_put:
-                        legs += [
-                            {"action": "buy", "type": "call", "strike": self._strike(far_call),
-                             "expiry": expiry_str, "quantity": 1, "symbol": far_call.get("symbol"),
-                             "mark_price": self._mark(far_call)},
-                            {"action": "buy", "type": "put", "strike": self._strike(far_put),
-                             "expiry": expiry_str, "quantity": 1, "symbol": far_put.get("symbol"),
-                             "mark_price": self._mark(far_put)},
-                        ]
-        elif strategy == "long_straddle":
-            call = self._nearest(chain, "call_options", spot)
-            put = self._nearest(chain, "put_options", spot)
-            if call and put:
-                legs = [
-                    {"action": "buy", "type": "call", "strike": self._strike(call), "expiry": expiry_str,
-                     "quantity": 1, "symbol": call.get("symbol"), "mark_price": self._mark(call)},
-                    {"action": "buy", "type": "put", "strike": self._strike(put), "expiry": expiry_str,
-                     "quantity": 1, "symbol": put.get("symbol"), "mark_price": self._mark(put)},
-                ]
+        filtered_chain = []
+        for opt in chain:
+            strike = self._strike(opt)
+            if strike > 0 and spot * 0.9 <= strike <= spot * 1.1:
+                filtered_chain.append({
+                    "symbol": opt.get("symbol"),
+                    "contract_type": opt.get("contract_type"),
+                    "strike": strike,
+                    "mark_price": self._mark(opt),
+                })
+        
+        from backend.ai.agents import _call_gemini, _strip_json_fences
+        import json
+
+        strategies_list = list(STRATEGIES.keys())
+        prompt = f"""You are the Options Council AI.
+Direction Bias: {direction}
+Conviction: {conviction}/10
+IV Regime: {regime} (Expected move: {iv_snapshot.get('expected_move_pct')}%)
+Spot Price: {spot}
+Max Budget INR: {max_loss_budget}
+
+Available Options (+/- 10% spot, expiry {expiry_str}, DTE {dte}):
+{json.dumps(filtered_chain, indent=2)}
+
+Select the optimal strategy from: {strategies_list}
+Output JSON:
+{{
+  "strategy": "one of the allowed strategies",
+  "reasoning": "why you chose this strategy and these strikes based on liquidity/greeks",
+  "legs": [
+    {{"symbol": "OPT-...", "action": "buy" or "sell", "type": "call" or "put", "quantity": 1}}
+  ]
+}}
+"""
+        raw = await _call_gemini("gemini-2.5-flash", prompt, "Options Council")
+        try:
+            ai_decision = json.loads(_strip_json_fences(raw))
+            strategy = ai_decision.get("strategy")
+            meta = STRATEGIES.get(strategy, {"when": "AI picked", "max_loss": "unknown", "max_gain": "unknown", "theta": "unknown"})
+            legs = []
+            for ai_leg in ai_decision.get("legs", []):
+                opt = next((o for o in chain if o.get("symbol") == ai_leg.get("symbol")), None)
+                if opt:
+                    legs.append({
+                        "action": ai_leg.get("action", "buy"),
+                        "type": ai_leg.get("type", "call"),
+                        "strike": self._strike(opt),
+                        "expiry": expiry_str,
+                        "quantity": ai_leg.get("quantity", 1),
+                        "symbol": opt.get("symbol"),
+                        "mark_price": self._mark(opt)
+                    })
+        except Exception as e:
+            logger.error(f"Options AI parsing failed: {e}")
+            return {"strategy": "error", "available": False, "reason": f"AI failed: {e}", "meta": {}}
 
         if not legs:
             return {"strategy": strategy, "available": False,
-                    "reason": "could not assemble legs from chain", "meta": meta}
+                    "reason": "could not assemble legs from AI response", "meta": meta}
 
         debit = sum(l["mark_price"] for l in legs if l["action"] == "buy")
         credit = sum(l["mark_price"] for l in legs if l["action"] == "sell")

@@ -589,27 +589,67 @@ class SMCAnalyser:
     # Full analysis
     # ------------------------------------------------------------------
 
+    async def _compute_4h_structure(self, instrument: str, delta_client: Any) -> dict:
+        if hasattr(delta_client, "get"):
+            candles = await delta_client.get("candles_4h")
+        else:
+            candles = await delta_client.get_candles(instrument, "240", 100)
+        df = self._prepare_df(candles)
+        structure = self.detect_market_structure(df)
+        obs = self.detect_order_blocks(df, structure)
+        fvgs = self.detect_fvg(df)
+        return {"df": df, "structure": structure, "obs": obs, "fvgs": fvgs}
+
+    async def _compute_1h_structure(self, instrument: str, delta_client: Any) -> dict:
+        if hasattr(delta_client, "get"):
+            candles = await delta_client.get("candles_1h")
+        else:
+            candles = await delta_client.get_candles(instrument, "60", 100)
+        df = self._prepare_df(candles)
+        structure = self.detect_market_structure(df)
+        obs = self.detect_order_blocks(df, structure)
+        fvgs = self.detect_fvg(df)
+        return {"df": df, "structure": structure, "obs": obs, "fvgs": fvgs}
+
+    async def _compute_15m_structure(self, instrument: str, delta_client: Any) -> dict:
+        if hasattr(delta_client, "get"):
+            candles = await delta_client.get("candles_15m")
+        else:
+            candles = await delta_client.get_candles(instrument, "15", 100)
+        df = self._prepare_df(candles)
+        structure = self.detect_market_structure(df)
+        obs = self.detect_order_blocks(df, structure)
+        fvgs = self.detect_fvg(df)
+        return {"df": df, "structure": structure, "obs": obs, "fvgs": fvgs}
+
+
     async def analyse(self, instrument: str, delta_client: Any, base_snapshot: dict, profile: dict | None = None) -> dict:
-        candles_4h, candles_1h, candles_15m = await asyncio.gather(
-            delta_client.get_candles(instrument, "240", 100),
-            delta_client.get_candles(instrument, "60", 100),
-            delta_client.get_candles(instrument, "15", 100),
+        from backend.perception.smc_cache import smc_cache
+
+        s4h = await smc_cache.get_or_compute(
+            "4h_structure", instrument, lambda: self._compute_4h_structure(instrument, delta_client)
         )
-        df_4h = self._prepare_df(candles_4h)
-        df_1h = self._prepare_df(candles_1h)
-        df_15m = self._prepare_df(candles_15m)
+        s1h = await smc_cache.get_or_compute(
+            "1h_structure", instrument, lambda: self._compute_1h_structure(instrument, delta_client)
+        )
+        s15m = await smc_cache.get_or_compute(
+            "15m_structure", instrument, lambda: self._compute_15m_structure(instrument, delta_client)
+        )
 
-        structure_4h = self.detect_market_structure(df_4h)
-        structure_1h = self.detect_market_structure(df_1h)
-        structure_15m = self.detect_market_structure(df_15m)
+        df_4h = s4h["df"]
+        structure_4h = s4h["structure"]
+        obs_4h = s4h["obs"]
+        fvgs_4h = s4h["fvgs"]
 
-        obs_4h = self.detect_order_blocks(df_4h, structure_4h)
-        obs_1h = self.detect_order_blocks(df_1h, structure_1h)
-        obs_15m = self.detect_order_blocks(df_15m, structure_15m)
+        df_1h = s1h["df"]
+        structure_1h = s1h["structure"]
+        obs_1h = s1h["obs"]
+        fvgs_1h = s1h["fvgs"]
 
-        fvgs_4h = self.detect_fvg(df_4h)
-        fvgs_1h = self.detect_fvg(df_1h)
-        fvgs_15m = self.detect_fvg(df_15m)
+        df_15m = s15m["df"]
+        structure_15m = s15m["structure"]
+        obs_15m = s15m["obs"]
+        fvgs_15m = s15m["fvgs"]
 
         liquidity_1h = self.detect_liquidity(df_1h)
         liquidity_15m = self.detect_liquidity(df_15m)
@@ -638,9 +678,31 @@ class SMCAnalyser:
             structure_15m["trend"], pre_score["score"],
         )
 
+        # Calculate suggested params for scenario simulator
+        dir_bias = "long" if structure_4h["trend"] == "BULLISH" else "short" if structure_4h["trend"] == "BEARISH" else None
+        price = base_snapshot.get("price")
+        s_entry = None
+        s_sl = None
+        s_tp = None
+        if dir_bias and price:
+            wanted = "BULLISH" if dir_bias == "long" else "BEARISH"
+            candidates = [o for o in obs_15m if o["type"] == wanted]
+            targets = (
+                liquidity_1h["buy_side_liquidity"] if dir_bias == "long"
+                else liquidity_1h["sell_side_liquidity"]
+            )
+            if candidates and targets:
+                ob = candidates[0]
+                s_entry = ob["midpoint"]
+                if dir_bias == "long":
+                    s_sl = ob["low"] * 0.998
+                else:
+                    s_sl = ob["high"] * 1.002
+                s_tp = targets[0]["price"]
+
         return {
             "context_text": context_text,
-            "price": base_snapshot.get("price"),
+            "price": price,
             "structures": {"4h": structure_4h, "1h": structure_1h, "15m": structure_15m},
             "order_blocks": {"4h": obs_4h, "1h": obs_1h, "15m": obs_15m},
             "fvgs": {"4h": fvgs_4h, "1h": fvgs_1h, "15m": fvgs_15m},
@@ -648,8 +710,12 @@ class SMCAnalyser:
             "premium_discount": pd_zone,
             "inducement": inducement,
             "raw_score_pre_boardroom": pre_score,
+            "suggested_entry": s_entry,
+            "suggested_sl": s_sl,
+            "suggested_tp": s_tp,
             "_df_15m": df_15m,  # internal, dropped before DB storage
         }
+
 
     def analyse_from_candles(self, candles: list[dict], instrument: str = "REPLAY", profile: dict | None = None) -> dict:
         """Run the SMC detector on a supplied historical candle window."""

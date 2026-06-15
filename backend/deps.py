@@ -2,6 +2,7 @@
 
 from backend.delta.client import DeltaClient
 from backend.perception.snapshot import MarketSnapshot
+from backend.cache import get_cache, invalidate_instrument
 
 delta_client = DeltaClient()
 snapshot_builder = MarketSnapshot(delta_client)
@@ -18,3 +19,4 @@ INSTRUMENT_MAP: dict[str, str] = {
 def to_delta_symbol(instrument: str) -> str:
     """Map an AI-facing instrument name to the Delta Exchange symbol."""
     return INSTRUMENT_MAP.get(instrument, instrument)
+

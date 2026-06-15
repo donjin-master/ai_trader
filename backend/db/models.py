@@ -60,7 +60,10 @@ class Trade(Base):
     setup_score: Mapped[float | None] = mapped_column(Numeric)
     setup_grade: Mapped[str | None] = mapped_column(String)
     position_params: Mapped[dict | None] = mapped_column(JSONB)  # sizing calculation
+    trigger_event_type: Mapped[str | None] = mapped_column(String, server_default=text("'scheduled_scan'"))
+    scenario_simulation: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
+
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
 
@@ -142,6 +145,9 @@ class RiskProfile(Base):
     trade_start_time: Mapped[str] = mapped_column(String, server_default=text("'09:30'"))
     trade_end_time: Mapped[str] = mapped_column(String, server_default=text("'23:00'"))
     blackout_windows: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    active_instruments: Mapped[list | None] = mapped_column(
+        JSONB, server_default=text("""'["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]'::jsonb""")
+    )
     avoid_weekends: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # Risk controls
     daily_loss_limit_pct: Mapped[float] = mapped_column(Numeric, server_default=text("3.0"))

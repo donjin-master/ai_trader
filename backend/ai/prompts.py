@@ -327,3 +327,56 @@ Watch for: "{watch_for}"
 
 Respond ONLY as JSON: {{"score": int, "reason": str}}
 """
+
+SCENARIO_SIMULATION = """
+A potential trade is being evaluated. Simulate three scenarios.
+
+TRADE PARAMETERS:
+Instrument: {instrument}
+Direction: {direction}
+Entry: {entry_price}
+Stop Loss: {stop_loss} (risk: {risk_pct})
+Take Profit: {take_profit} (reward: {reward_pct})
+Nearest level above: {nearest_level_above}
+Nearest level below: {nearest_level_below}
+
+MARKET CONTEXT:
+{smc_context}
+
+Simulate these three scenarios:
+
+SCENARIO A — THESIS CORRECT:
+The analysis is right and the trade works as planned.
+Describe exactly how price would move, what it would look like on the chart,
+and what the trader should monitor during the hold.
+At what specific price or condition would the thesis become invalidated
+EVEN IF the trade is still showing profit?
+
+SCENARIO B — PARTIALLY WRONG:
+The direction might be right but timing or level is wrong.
+Price consolidates or moves sideways for 2-4 hours without reaching TP.
+IV and funding shift. What changes? What should be done?
+
+SCENARIO C — COMPLETELY WRONG:
+The analysis is wrong. Price moves immediately against the position
+and approaches the stop loss.
+Was the stop loss placed correctly for this scenario?
+What signals in the current context should have warned against this trade?
+
+Respond ONLY in valid JSON, no preamble, no markdown:
+{{
+  "scenario_a_description": "string",
+  "scenario_a_play_out": "string",
+  "scenario_a_monitor": "string",
+  "scenario_a_invalidation": "string",
+  "scenario_b_description": "string",
+  "scenario_b_change": "string",
+  "scenario_b_adjustment": "string",
+  "scenario_c_description": "string",
+  "scenario_c_sl_valid": "Yes or No with reason",
+  "scenario_c_missed_signals": "string",
+  "simulation_verdict": "string — should we take this trade given all three scenarios?",
+  "biggest_risk": "string — the single biggest risk factor"
+}}
+"""
+

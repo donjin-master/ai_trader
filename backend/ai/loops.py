@@ -8,6 +8,8 @@ from typing import Any
 from loguru import logger
 from sqlalchemy import select, text
 
+_chop_counters: dict[str, int] = {}
+
 from backend.ai import agents
 from backend.ai import prompts
 from backend.ai.validator import TradeDecisionValidator
@@ -98,6 +100,8 @@ async def _store_decision(
     skip_reason: str | None = None,
     chart_15m: dict | None = None,
     chart_1h: dict | None = None,
+    trigger_event_type: str = "scheduled_scan",
+    scenario_simulation: dict | None = None,
 ) -> str | None:
     """Persist a decision (even HOLD, even ADVISORY/skipped) to the trades table."""
     try:
@@ -129,12 +133,15 @@ async def _store_decision(
                 setup_score=(setup_score or {}).get("score"),
                 setup_grade=(setup_score or {}).get("grade"),
                 position_params=position_params,
+                trigger_event_type=trigger_event_type,
+                scenario_simulation=scenario_simulation,
             )
             session.add(trade)
             await session.commit()
             await session.refresh(trade)
             logger.info("Decision logged to DB: {}", trade.id)
             return str(trade.id)
+
     except Exception:
         logger.exception("Failed to store decision")
         return None
@@ -144,7 +151,11 @@ async def _store_decision(
 # LOOP 1 — Live decision (called every 15 min by scheduler)
 # ---------------------------------------------------------------------------
 
-async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
+async def run_decision_loop(
+    instrument: str = "BTCUSD_PERP",
+    trigger_event=None,        # MarketEvent | None — None means safety-net/scheduled
+    trigger_context: str = "", # Pre-built context string from AnalysisDispatcher
+) -> dict:
     """Full cycle: pre-checks → SMC → boardroom → score → risk gate → size → route."""
     from backend.execution.risk_profile import risk_manager
     from backend.ai.context_builder import context_builder
@@ -154,6 +165,7 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
     from backend.execution.order_state_manager import order_state_manager
 
     symbol = to_delta_symbol(instrument)
+    trigger_type = trigger_event.type if trigger_event else "scheduled_scan"
 
     # 0. State machine gate — boardroom only runs in WATCHING state
     if not await order_state_manager.can_run_boardroom(instrument):
@@ -161,7 +173,7 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
         logger.info("Skipping boardroom for {} — state: {}", instrument, state.value)
         return {"skipped": True, "reason": f"state is {state.value}"}
 
-    logger.info("Decision loop started for {}", instrument)
+    logger.info("Decision loop started for {} (trigger: {})", instrument, trigger_type)
 
     # 1. Risk profile + pre-checks
     profile = await risk_manager.get_profile()
@@ -175,15 +187,73 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
         return {"skipped": True, "reason": reason}
 
     # 2. Perception: base snapshot + full SMC multi-timeframe analysis
-    snapshot = await snapshot_builder.build_snapshot(symbol)
+    # 2. Perception: base snapshot + full SMC multi-timeframe analysis using cache
+    from backend.cache import get_cache
+    cache = get_cache(symbol, delta_client)
+
+    snapshot = await snapshot_builder.build_snapshot(symbol, cache)
     try:
-        smc_analysis = await smc_analyser.analyse(symbol, delta_client, snapshot, profile)
+        smc_analysis = await smc_analyser.analyse(symbol, cache, snapshot, profile)
     except Exception:
         logger.exception("SMC analysis failed — falling back to basic snapshot")
         smc_analysis = None
 
+    if smc_analysis:
+        import os
+        pre_score = smc_analysis.get("raw_score_pre_boardroom", {}).get("score", 0)
+        min_score = float(os.getenv("MIN_SMC_PRE_SCORE", "4.0"))
+        if pre_score < min_score:
+            _chop_counters[instrument] = _chop_counters.get(instrument, 0) + 1
+            skip_reason = f"SMC pre-score too low ({pre_score} < {min_score})"
+            
+            if _chop_counters[instrument] >= 6:
+                logger.info("Chop counter hit 6 for {}. Checking market regime...", instrument)
+                _chop_counters[instrument] = 0
+                
+                from backend.ai import agents
+                from backend.perception.iv_analyser import iv_analyser
+                
+                iv_snapshot = await iv_analyser.get_iv_snapshot(instrument)
+                regime_decision = await agents.run_market_regime_agent(instrument, snapshot, iv_snapshot)
+                
+                if regime_decision.get("action") == "route_options":
+                    logger.info("Regime Agent routed to Options Council for {}", instrument)
+                    from backend.ai.options_strategy_selector import options_selector
+                    
+                    opt_res = await options_selector.select_strategy(
+                        direction=regime_decision.get("direction", "neutral"),
+                        conviction=regime_decision.get("conviction", 5),
+                        iv_snapshot=iv_snapshot,
+                        days_to_expiry=14,
+                        max_loss_pct=1.0,
+                        instrument=instrument
+                    )
+                    return {"skipped": False, "options_play": opt_res, "reason": "Routed by Regime Agent"}
+                elif regime_decision.get("action") == "route_boardroom":
+                    logger.info("Regime Agent forced Boardroom run for {}", instrument)
+                    forced_boardroom = True
+                else:
+                    return {"skipped": True, "reason": "Regime Agent says wait"}
+            else:
+                logger.info("Decision loop aborted for {}: {}", instrument, skip_reason)
+                await _store_decision(
+                    status="logged_only",
+                    instrument=instrument,
+                    decision={"action": "skip", "reasoning": skip_reason, "confidence": 0, "boardroom": []},
+                    snapshot=snapshot,
+                    smc_analysis=smc_analysis,
+                    setup_score={"score": pre_score, "grade": "F"},
+                    trigger_event_type="scheduled_scan" if trigger_event is None else "event_driven"
+                )
+                return {"skipped": True, "reason": skip_reason}
+        else:
+            _chop_counters[instrument] = 0
+            forced_boardroom = False
+    else:
+        forced_boardroom = False
+
     # 3. Context
-    key_levels = await key_levels_engine.compute(instrument, snapshot.get("price") or 0)
+    key_levels = await key_levels_engine.compute(instrument, snapshot.get("price") or 0, cache)
     context_summary = (
         f"{instrument} {(smc_analysis or {}).get('raw_score_pre_boardroom', {})} "
         f"funding {snapshot.get('funding_rate', 0)} "
@@ -203,14 +273,15 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
     chart_15m: dict | None = None
     chart_1h: dict | None = None
     try:
-        candles_15m = await delta_client.get_candles(symbol, "15", 80)
-        candles_1h = await delta_client.get_candles(symbol, "60", 80)
+        candles_15m = await cache.get("candles_15m")
+        candles_1h = await cache.get("candles_1h")
         chart_15m = await chart_generator.generate_decision_chart(
             symbol, "15m", candles_15m, smc_analysis, open_state, None,
         )
         chart_1h = await chart_generator.generate_decision_chart(
             symbol, "1h", candles_1h, smc_analysis, open_state, None,
         )
+
     except Exception:
         logger.exception("Chart generation failed — continuing text-only")
 
@@ -227,6 +298,53 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
         except Exception:
             logger.exception("IV snapshot failed — boardroom continues without options context")
 
+    # 3d. Skills — load only skills relevant to current regime/instrument
+    skills_context = ""
+    try:
+        from backend.skills import skill_loader
+        regime = (smc_analysis or {}).get("regime", "RANGING")
+        consecutive_losses = daily_stats.get("consecutive_losses", 0)
+        position_size_inr = (portfolio or {}).get("available_margin", 0) * profile.get("risk_per_trade_pct", 1.0) / 100
+        iv_percentile = iv_snapshot.get("iv_percentile", 50) if iv_snapshot else 50
+        relevant_skills = skill_loader.get_relevant_skills(
+            regime=regime,
+            instrument=instrument,
+            consecutive_losses=consecutive_losses,
+            position_size_inr=position_size_inr,
+            iv_percentile=iv_percentile,
+        )
+        skills_context = skill_loader.format_for_prompt(relevant_skills)
+    except Exception:
+        logger.exception("Skills loading failed — continuing without skills context")
+
+    # 3e. Pre-decision scenario simulation
+    import os
+    simulation_enabled = os.getenv("SCENARIO_SIMULATION_ENABLED", "true").lower() == "true"
+    simulation_context = ""
+    simulation_result = None
+
+    if simulation_enabled and smc_analysis:
+        suggested_sl = smc_analysis.get("suggested_sl")
+        suggested_tp = smc_analysis.get("suggested_tp")
+        suggested_entry = smc_analysis.get("suggested_entry")
+        if suggested_sl and suggested_tp and suggested_entry:
+            proposed_direction = "long" if suggested_tp > suggested_entry else "short"
+            from backend.simulation.scenario_simulator import ScenarioSimulator
+            try:
+                simulator = ScenarioSimulator()
+                simulation_result = await simulator.simulate(
+                    instrument=instrument,
+                    direction=proposed_direction,
+                    entry_price=await cache.price(),
+                    suggested_sl=suggested_sl,
+                    suggested_tp=suggested_tp,
+                    smc_context=smc_analysis["context_text"][:1500],
+                    key_levels=key_levels
+                )
+                simulation_context = simulator.format_for_boardroom(simulation_result)
+            except Exception:
+                logger.exception("Scenario simulation failed")
+
     # 4. Boardroom (full context; Chair also sees charts when vision is on)
     if smc_analysis:
         market_context = await context_builder.build(
@@ -241,6 +359,13 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
         )
     else:
         market_context = key_levels.get("text") or snapshot
+
+    if simulation_context and isinstance(market_context, str):
+        market_context = f"{simulation_context}\n\n{market_context}"
+
+    if skills_context and isinstance(market_context, str):
+        market_context = f"{skills_context}\n\n{market_context}"
+
 
     # AREA 5: Trading DNA overlay — the trader's real historical patterns
     try:
@@ -265,15 +390,35 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
             f"When making the trade decision, also set instrument_preference "
             f"(perp | options | either) and state why the IV regime supports it."
         )
-    decision = await agents.run_boardroom(
-        instrument=instrument,
-        market_snapshot=market_context,
-        portfolio_state=portfolio,
-        recent_lessons=lessons,
-        counterfactual_insights=insights,
-        chart_15m_b64=chart_15m["image_base64"] if send_charts else None,
-        chart_1h_b64=chart_1h["image_base64"] if (send_charts and chart_1h) else None,
-    )
+    # Prepend trigger context so boardroom knows WHY it's running (event vs safety-net)
+    if trigger_context and isinstance(market_context, str):
+        market_context = f"{trigger_context}\n\n{market_context}"
+
+    if not forced_boardroom and smc_analysis:
+        logger.info("Using mathematical SMC decision for {} (Bypassing Boardroom LLM)", instrument)
+        score = smc_analysis.get("raw_score_pre_boardroom", {}).get("score", 0)
+        action_val = smc_analysis.get("raw_score_pre_boardroom", {}).get("bias", "hold")
+        
+        decision = {
+            "action": action_val,
+            "confidence": int(score),
+            "reasoning": f"Mathematical SMC Setup. Score: {score}/10. (Boardroom LLM bypassed to save API costs)",
+            "boardroom": [],
+            "size": smc_analysis.get("recommended_size", 0.5),
+            "stop_loss": smc_analysis.get("stop_loss", 0),
+            "take_profit_1": smc_analysis.get("take_profit_1", 0)
+        }
+    else:
+        logger.info("Running LLM Boardroom for {}", instrument)
+        decision = await agents.run_boardroom(
+            instrument=instrument,
+            market_snapshot=market_context,
+            portfolio_state=portfolio,
+            recent_lessons=lessons,
+            counterfactual_insights=insights,
+            chart_15m_b64=chart_15m["image_base64"] if send_charts else None,
+            chart_1h_b64=chart_1h["image_base64"] if (send_charts and chart_1h) else None,
+        )
     decision.setdefault("instrument", instrument)
     action = decision.get("action", "hold")
 
@@ -316,6 +461,8 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
             instrument, snapshot, decision, "logged_only",
             smc_analysis=smc_analysis, chart_15m=chart_15m, chart_1h=chart_1h,
             skip_reason="entry_mode=wait (no valid entry zone yet)",
+            trigger_event_type=trigger_type,
+            scenario_simulation=simulation_result,
         )
         await telegram.send_message(
             f"⏳ <b>Boardroom: WAIT</b> ({instrument} {action.upper()} forming)\n"
@@ -359,14 +506,15 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
             instrument, snapshot, decision, status,
             smc_analysis=smc_analysis, setup_score=setup_score,
             chart_15m=chart_15m, chart_1h=chart_1h,
+            trigger_event_type=trigger_type,
+            scenario_simulation=simulation_result,
         )
-        await telegram.send_message(
-            f"🧠 <b>Boardroom: {action.upper()}</b> "
-            f"({decision.get('consensus_level', '—')}, {decision.get('vote_tally', '—')})\n"
-            f"{instrument} | Setup: {(setup_score or {}).get('score', '—')}/10 "
-            f"{(setup_score or {}).get('grade', '')}\n"
-            f"{('❌ Rejected: ' + rejection) if not is_valid else ''}"
-            f"{str(decision.get('reasoning'))[:250]}"
+        await telegram.send_decision_summary(
+            instrument=instrument,
+            decision=decision,
+            setup_score=setup_score,
+            chart_bytes=chart_15m,
+            rejection=rejection if not is_valid else None,
         )
         return {"decision": decision, "trade_id": trade_id, "executed": False}
 
@@ -389,6 +537,8 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
                 instrument, snapshot, decision, "logged_only",
                 smc_analysis=smc_analysis, setup_score=setup_score,
                 chart_15m=chart_15m, chart_1h=chart_1h,
+                trigger_event_type=trigger_type,
+                scenario_simulation=simulation_result,
             )
             await telegram.send_smc_alert(instrument, decision, setup_score, None)
             return {"decision": decision, "trade_id": trade_id, "executed": False}
@@ -398,6 +548,8 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
             smc_analysis=smc_analysis, setup_score=setup_score,
             skip_reason=rejection_reason,
             chart_15m=chart_15m, chart_1h=chart_1h,
+            trigger_event_type=trigger_type,
+            scenario_simulation=simulation_result,
         )
         await telegram.send_message(
             f"⏭️ <b>Trade skipped</b> ({instrument} {action.upper()})\n"
@@ -418,7 +570,12 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
             available_margin = float(asset.get("available_balance") or 0)
             break
 
-    position_params = risk_manager.calculate_position_size(
+    edge_factor = (
+        await risk_manager.get_pattern_edge(trigger_type)
+        if profile["sizing_mode"] == "EDGE"
+        else None
+    )
+    position_params = await risk_manager.calculate_position_size(
         risk_per_trade_pct=profile["risk_per_trade_pct"],
         entry_price=price,
         stop_loss_price=sl_price,
@@ -428,7 +585,12 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
         win_rate_history=daily_stats.get("historical_win_rate"),
         max_position_size_pct=profile["max_position_size_pct"],
         total_capital=profile["total_capital"],
+        edge_factor=edge_factor,
+        pattern_type=smc_analyser.classify_pattern_type(smc_analysis) if smc_analysis else "general_smc",
+        session=key_levels.get("current_session", "us_london"),
+        instrument=instrument,
     )
+
     decision["size_pct"] = position_params["position_size_pct"]
 
     # 9. Route by mode
@@ -438,6 +600,8 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
             smc_analysis=smc_analysis, setup_score=setup_score,
             position_params=position_params,
             chart_15m=chart_15m, chart_1h=chart_1h,
+            trigger_event_type=trigger_type,
+            scenario_simulation=simulation_result,
         )
         if trade_id:
             await telegram.send_approval_request(
@@ -455,6 +619,8 @@ async def run_decision_loop(instrument: str = "BTCUSD_PERP") -> dict:
         smc_analysis=smc_analysis, setup_score=setup_score,
         position_params=position_params,
         chart_15m=chart_15m, chart_1h=chart_1h,
+        trigger_event_type=trigger_type,
+        scenario_simulation=simulation_result,
     )
     result = await executor.execute_decision(decision, snapshot, portfolio, trade_id)
     await telegram.send_message(
@@ -668,8 +834,9 @@ async def run_multi_instrument_decision_loop() -> dict:
     open_count = len([p for p in portfolio if p.get("size", 0) != 0])
     profile = await risk_manager.get_profile()
     max_concurrent = profile.get("max_concurrent_trades", 3)
+    active_instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]
 
-    pre_scans = list(await asyncio.gather(*(run_pre_scan(inst) for inst in INSTRUMENTS)))
+    pre_scans = list(await asyncio.gather(*(run_pre_scan(inst) for inst in active_instruments)))
     pre_scans.sort(key=lambda x: x["score"], reverse=True)
     qualifying = [p for p in pre_scans if p["score"] >= 6]
     logger.info("Pre-scan results: {}", [(p["instrument"], p["score"]) for p in pre_scans])

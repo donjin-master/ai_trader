@@ -27,6 +27,36 @@ class BoardroomContextBuilder:
         session_notes = key_levels.get("session_notes") or key_levels_engine.get_session_notes(instrument, session)
         price = float(smc_analysis.get("price") or key_levels.get("price") or 0)
         rr_analysis = self._compute_rr_analysis(smc_analysis, key_levels, portfolio_state, profile)
+
+        # Fetch meta-lessons (always injected, high priority)
+        from sqlalchemy import text
+        from backend.db.database import AsyncSessionLocal
+        from loguru import logger
+        meta_lessons = []
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(text("""
+                    SELECT pattern_text, confidence_score
+                    FROM meta_lessons
+                    WHERE active = true
+                    ORDER BY confidence_score DESC, created_at DESC
+                    LIMIT 5
+                """))
+                meta_lessons = [{"pattern_text": row[0], "confidence_score": float(row[1])} for row in result.all()]
+        except Exception:
+            logger.exception("Failed to fetch active meta-lessons")
+
+        meta_text = ""
+        if meta_lessons:
+            meta_text = "=== ENDURING META-PATTERNS (highest priority) ===\n"
+            meta_text += "\n".join([
+                f"• [{r['confidence_score']:.0f}/10] {r['pattern_text']}"
+                for r in meta_lessons
+            ]) + "\n\n"
+
+        individual_text = "=== RECENT SPECIFIC LESSONS ===\n" + self._format_lessons(recent_lessons)
+        lessons_section = meta_text + individual_text
+
         return f"""{instrument} BOARDROOM - {now.strftime('%H:%M IST')} | {now.strftime('%A')} | {session.upper()} session
 ============================================================
 {session_notes}
@@ -41,12 +71,12 @@ class BoardroomContextBuilder:
 === PORTFOLIO STATE ===
 {self._format_portfolio(portfolio_state, daily_stats)}
 
-=== RECENT LESSONS (most relevant) ===
-{self._format_lessons(recent_lessons)}
+{lessons_section}
 
 === COUNTERFACTUAL INSIGHTS ===
 {self._format_counterfactuals(counterfactual_insights)}
 """
+
 
     def _compute_rr_analysis(self, smc: dict, levels: dict, portfolio: dict, profile: dict | None = None) -> str:
         current = float(smc.get("price") or levels.get("price") or 0)

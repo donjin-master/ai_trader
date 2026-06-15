@@ -3,6 +3,8 @@
 import asyncio
 import json
 import os
+import re
+import time
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -18,12 +20,48 @@ _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
 def _strip_json_fences(text: str) -> str:
+    """Extract the first {...} JSON block from LLM output, stripping fences or surrounding prose."""
     text = text.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return text.strip()
+    # Try extracting from code fences first
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts[1::2]:  # odd-indexed parts are inside fences
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{"):
+                return _sanitise_json(part)
+    # Fall back to regex: find the outermost { ... } block
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        return _sanitise_json(match.group(0))
+    return text
+
+
+def _sanitise_json(raw: str) -> str:
+    """Fix common LLM JSON mistakes: unescaped newlines/tabs inside string values."""
+    result = []
+    in_string = False
+    escape_next = False
+    for ch in raw:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+        elif ch == "\\" and in_string:
+            result.append(ch)
+            escape_next = True
+        elif ch == '"':
+            in_string = not in_string
+            result.append(ch)
+        elif in_string and ch == "\n":
+            result.append("\\n")
+        elif in_string and ch == "\r":
+            result.append("\\r")
+        elif in_string and ch == "\t":
+            result.append("\\t")
+        else:
+            result.append(ch)
+    return "".join(result)
 
 
 async def _call_agent(system: str, user_message: str, agent_name: str) -> dict:
@@ -47,58 +85,6 @@ async def _call_agent(system: str, user_message: str, agent_name: str) -> dict:
     raise ValueError(f"{agent_name} returned unparseable JSON after retry: {last_text[:200]}")
 
 
-async def run_bull_agent(instrument: str, snapshot: dict) -> dict:
-    system = prompts.SYSTEM_BULL.replace("{instrument}", instrument)
-    user = f"Current market data for {instrument}:\n{json.dumps(snapshot, indent=2)}"
-    result = await _call_agent(system, user, "BullAgent")
-    logger.info("Bull conviction: {}", result.get("conviction"))
-    return result
-
-
-async def run_bear_agent(instrument: str, snapshot: dict) -> dict:
-    system = prompts.SYSTEM_BEAR.replace("{instrument}", instrument)
-    user = f"Current market data for {instrument}:\n{json.dumps(snapshot, indent=2)}"
-    result = await _call_agent(system, user, "BearAgent")
-    logger.info("Bear conviction: {}", result.get("conviction"))
-    return result
-
-
-async def run_judge_agent(
-    instrument: str,
-    bull_result: dict,
-    bear_result: dict,
-    portfolio_state: dict,
-    recent_lessons: list[dict],
-    counterfactual_insights: list[str],
-) -> dict:
-    lessons_text = (
-        json.dumps(recent_lessons, indent=2, default=str)
-        if recent_lessons
-        else "No lessons yet — make your best judgment."
-    )
-    insights_text = (
-        "\n".join(f"- {i}" for i in counterfactual_insights)
-        if counterfactual_insights
-        else "No counterfactual insights yet — make your best judgment."
-    )
-    user = (
-        f"Instrument: {instrument}\n\n"
-        f"=== BULL CASE (conviction {bull_result.get('conviction')}) ===\n"
-        f"{json.dumps(bull_result, indent=2)}\n\n"
-        f"=== BEAR CASE (conviction {bear_result.get('conviction')}) ===\n"
-        f"{json.dumps(bear_result, indent=2)}\n\n"
-        f"=== PORTFOLIO STATE ===\n"
-        f"{json.dumps(portfolio_state, indent=2, default=str)}\n\n"
-        f"=== LAST 10 LESSONS ===\n{lessons_text}\n\n"
-        f"=== RECENT COUNTERFACTUAL INSIGHTS ===\n{insights_text}\n\n"
-        f"Make your final decision now."
-    )
-    result = await _call_agent(prompts.SYSTEM_JUDGE, user, "JudgeAgent")
-    logger.info(
-        "Judge decision: {} (confidence {})",
-        str(result.get("action", "")).upper(), result.get("confidence"),
-    )
-    return result
 
 
 async def run_reflection_agent(trade: dict, market_data_window: dict) -> dict:
@@ -134,72 +120,45 @@ import httpx
 
 BOARD_MEMBERS = [
     {
-        "name": "haiku",
-        "model": "claude-haiku-4-5-20251001",
+        "name": "claude_technical",
+        "model": "claude-sonnet-4-6",
         "provider": "anthropic",
-        "personality": "Technical analyst, focus on price action and derivatives data",
+        "personality": (
+            "Technical price action analyst. "
+            "Focus: chart structure, OBs, FVGs, market structure. "
+            "Ignore macro and sentiment. Pure chart analysis."
+        ),
+        "analytical_mandate": "TECHNICAL",
     },
     {
-        "name": "gpt",
-        "model": "gpt-5.4",
+        "name": "gpt_macro",
+        "model": "gpt-5.5",
         "provider": "openai",
-        "personality": "Macro analyst, focus on sentiment, funding rates, and market structure",
+        "personality": (
+            "Macro and derivatives analyst. "
+            "Focus: funding rates, open interest, options flow, "
+            "sentiment, positioning. Big picture view."
+        ),
+        "analytical_mandate": "MACRO",
     },
     {
-        "name": "gemini",
-        "model": "gemini-3.5-flash",
+        "name": "gemini_risk",
+        "model": "gemini-2.5-flash",
         "provider": "google",
-        "personality": "Risk analyst, focus on volatility, options data, and downside scenarios",
-    },
+        "personality": (
+            "Risk management analyst. "
+            "Focus: downside scenarios, volatility, IV regime, "
+            "what can go wrong. Inherently skeptical."
+        ),
+        "analytical_mandate": "RISK",
+    }
 ]
 
-BOARDROOM_MODE = settings.boardroom_mode
-
-SYSTEM_TECHNICAL_ANALYST = """
-You are a technical price action analyst on a crypto trading board.
-Your focus: chart structure, Smart Money Concepts (SMC), swing points, BOS, CHoCH, order blocks, Fair Value Gaps (FVGs), liquidity sweeps, and invalidation levels.
-
-Your Skills:
-1. Swing Analysis: Locate swing high/low points. Determine structural direction (BULLISH/BEARISH/RANGING).
-2. Trigger Spotting: Locate clean wicks sweeping liquidity or breaking structure (CHoCH on 15M). A 15M CHoCH after a sweep is your primary trigger signal.
-3. Zone Confluence: Check if an FVG overlaps with an unmitigated Order Block (OB).
-4. Entry Offset: Determine precise entries near the boundary of the OB or inside the FVG.
-
-Rule: If a clear 15M trigger or structural change (CHoCH) occurs after a liquidity sweep, endorse a trade entry immediately even if the macro trend is ranging.
-"""
-
-SYSTEM_RISK_MANAGER = """
-You are a risk manager on a crypto trading board.
-Your focus: identifying invalidation logic, stop safety, and risk/reward asymmetry.
-
-Your Skills:
-1. Invalidation Check: Validate if the proposed stop loss is logically placed (e.g. below the sweep low or OB low for longs; above high for shorts). Ensure it is not arbitrary.
-2. Volatility Stress: Ensure the stop distance is wide enough to survive noise (using ATR context if available).
-3. Risk/Reward (R:R): Compare entry to target levels (key levels / round numbers).
-
-Rule: Your mandate is to evaluate if risk is bounded and payout is asymmetric. Support the trade if invalidation is logical and target R:R is valid (>= 1.5R). Oppose only if invalidation is arbitrary, R:R is poor (< 1.5R), or safety limits (daily budget/loss limits) are violated. Do not veto setups on minor uncertainty.
-"""
-
-SYSTEM_MOMENTUM_ANALYST = """
-You are a momentum and market flow analyst on a crypto trading board.
-Your focus: volume confirmation, funding rates, open interest, and session activity.
-
-Your Skills:
-1. Volume Validation: Identify volume expansion on candles breaking structure or sweeping liquidity.
-2. Market Skew: Check if funding rate or open interest changes support the trade direction (e.g., negative funding supporting long squeeze).
-3. Session Alignment: Track if trading is occurring during active London or US session hours.
-
-Rule: Identify if there is sufficient flow and volume backing to accelerate the trade. Support the entry if volume is rising, funding is favorable, or the session is active.
-"""
-
-SINGLE_CLAUDE_MEMBERS = [
-    {"name": "claude_technical", "model": MODEL, "provider": "anthropic", "system": SYSTEM_TECHNICAL_ANALYST},
-    {"name": "claude_risk", "model": MODEL, "provider": "anthropic", "system": SYSTEM_RISK_MANAGER},
-    {"name": "claude_momentum", "model": MODEL, "provider": "anthropic", "system": SYSTEM_MOMENTUM_ANALYST},
-]
-
-# Chair on Sonnet 4.6 — strong judgment at lower cost (owner's choice; Opus optional)
-CHAIR = {"name": "sonnet_chair", "model": "claude-sonnet-4-6", "provider": "anthropic"}
+CHAIR = {
+    "name": "claude_chair",
+    "model": "claude-opus-4-8",
+    "provider": "anthropic"
+}
 
 _PROVIDER_KEYS = {
     "anthropic": lambda: settings.anthropic_api_key,
@@ -209,23 +168,24 @@ _PROVIDER_KEYS = {
 
 
 def active_board_members() -> list[dict]:
-    """Members whose provider key is configured. GPT/Gemini activate when keys land in .env."""
-    if BOARDROOM_MODE == "single_claude":
-        return SINGLE_CLAUDE_MEMBERS if settings.anthropic_api_key else []
-    active = [m for m in BOARD_MEMBERS if (_PROVIDER_KEYS[m["provider"]]() or "").strip()]
-    skipped = [m["name"] for m in BOARD_MEMBERS if m not in active]
-    if skipped:
-        logger.warning("Board members without API keys (skipped): {}", skipped)
-    return active
+    """All 3 members are always active, falling back to Sonnet if APIs fail."""
+    return BOARD_MEMBERS
 
 
 async def _call_anthropic(model: str, system: str, user: str, max_tokens: int = MAX_TOKENS) -> str:
     response = await _client.messages.create(
         model=model,
         max_tokens=max_tokens,
-        system=system,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user}],
     )
+    usage = response.usage
+    if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
+        logger.debug(
+            "Prompt cache HIT: {} tokens saved (${:.4f})",
+            usage.cache_read_input_tokens,
+            usage.cache_read_input_tokens * 0.003 / 1000,
+        )
     return response.content[0].text
 
 
@@ -267,7 +227,7 @@ async def _call_google(model: str, system: str, user: str) -> str:
     # budget before the answer. Disable it and give generous headroom so the
     # JSON vote/decision is never truncated.
     gen_config: dict = {"maxOutputTokens": 2048}
-    if model.startswith("gemini-2.5") or model.startswith("gemini-3"):
+    if model.startswith("gemini-2.5"):
         gen_config["thinkingConfig"] = {"thinkingBudget": 0}
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -308,85 +268,81 @@ def _snapshot_text(market_snapshot: dict | str) -> str:
 async def _cast_vote(
     member: dict, market_snapshot: dict | str, recent_lessons: list[dict]
 ) -> dict:
-    """One board member casts their independent vote."""
+    """One board member casts their independent vote.
+    On failure or missing API key: fallback to Claude Sonnet with member's personality.
+    """
+    import time
     lessons_text = "\n".join(
         f"- {l.get('watch_for') or l.get('lesson') or l.get('lesson_text') or ''}"
         for l in recent_lessons[:5]
     ) or "No lessons yet."
 
+    system_prompt = prompts.BOARDROOM_MEMBER_VOTE.format(
+        market_snapshot=_snapshot_text(market_snapshot),
+        recent_lessons=lessons_text,
+    )
+    user_prompt = (
+        f"Your analytical focus: {member['personality']}\n\n"
+        "Cast your independent vote based on the data provided."
+    )
+
+    t0 = time.monotonic()
     try:
-        raw = await _call_model(
-            member["provider"],
-            member["model"],
-            prompts.BOARDROOM_MEMBER_VOTE.format(
-                market_snapshot=_snapshot_text(market_snapshot),
-                recent_lessons=lessons_text,
-            ),
-            f"Your analytical focus: {member['personality']}\n\n"
-            f"Cast your independent vote based on the data provided.",
-        )
+        provider = member["provider"]
+        key = _PROVIDER_KEYS[provider]()
+        if not key or not key.strip():
+            raise ValueError(f"Missing API key for provider '{provider}'")
+
+        raw = await _call_model(provider, member["model"], system_prompt, user_prompt)
+        response_time_ms = int((time.monotonic() - t0) * 1000)
         result = json.loads(_strip_json_fences(raw))
         result["member"] = member["name"]
         result["model"] = member["model"]
+        result["response_time_ms"] = response_time_ms
+        result["fallback_used"] = False
         logger.info(
-            "Board member {} voted: {} (conviction: {})",
-            member["name"], result.get("vote"), result.get("conviction"),
+            "Board member {} voted: {} (conviction: {}, {}ms)",
+            member["name"], result.get("vote"), result.get("conviction"), response_time_ms,
         )
         return result
     except Exception as exc:
-        logger.error("Board member {} failed to vote: {}", member["name"], exc)
-        return {
-            "member": member["name"],
-            "model": member["model"],
-            "vote": "HOLD",
-            "conviction": 5,
-            "primary_reason": f"Vote failed: {exc}",
-            "key_signals": [],
-            "biggest_risk": "Technical failure",
-            "suggested_entry_offset_pct": 0,
-            "suggested_sl_offset_pct": 0,
-            "suggested_tp_offset_pct": 0,
-            "failed": True,
-        }
-
-
-async def _cast_vote_with_mandate(
-    member: dict, market_snapshot: dict | str, recent_lessons: list[dict]
-) -> dict:
-    """Single-Claude board member with distinct system mandate."""
-    lessons_text = "\n".join(
-        f"- {l.get('watch_for') or l.get('lesson') or l.get('lesson_text') or ''}"
-        for l in recent_lessons[:5]
-    ) or "No lessons yet."
-    try:
-        system = member["system"] + "\n\n" + prompts.BOARDROOM_MEMBER_VOTE.format(
-            market_snapshot=_snapshot_text(market_snapshot),
-            recent_lessons=lessons_text,
+        logger.warning(
+            "Board member {} ({}) failed: {}. Falling back to Claude Sonnet with mandate.",
+            member["name"], member["model"], exc
         )
-        raw = await _call_anthropic(
-            member["model"],
-            system,
-            "Cast your independent vote based only on your mandate.",
-        )
-        result = json.loads(_strip_json_fences(raw))
-        result["member"] = member["name"]
-        result["model"] = member["model"]
-        return result
-    except Exception as exc:
-        logger.error("Mandated board member {} failed: {}", member["name"], exc)
-        return {
-            "member": member["name"],
-            "model": member["model"],
-            "vote": "HOLD",
-            "conviction": 5,
-            "primary_reason": f"Vote failed: {exc}",
-            "key_signals": [],
-            "biggest_risk": "Technical failure",
-            "suggested_entry_offset_pct": 0,
-            "suggested_sl_offset_pct": 0,
-            "suggested_tp_offset_pct": 0,
-            "failed": True,
-        }
+        # Fallback: use Claude Sonnet with analytical mandate override
+        mandate_override = f"\nYour analytical mandate for this vote: {member['personality']}"
+        try:
+            raw = await _call_anthropic(
+                "claude-sonnet-4-6",
+                system_prompt + mandate_override,
+                "Cast your vote based on your analytical mandate."
+            )
+            response_time_ms = int((time.monotonic() - t0) * 1000)
+            result = json.loads(_strip_json_fences(raw))
+            result["member"] = member["name"]
+            result["model"] = "claude-sonnet-4-6-fallback"
+            result["response_time_ms"] = response_time_ms
+            result["fallback_used"] = True
+            logger.info("Fallback vote cast for {}", member["name"])
+            return result
+        except Exception as fallback_exc:
+            logger.error("Fallback also failed for {}: {}", member["name"], fallback_exc)
+            return {
+                "member": member["name"],
+                "model": "failed",
+                "vote": "HOLD",
+                "conviction": 5,
+                "primary_reason": f"API failure: {str(exc)} (fallback: {str(fallback_exc)})",
+                "key_signals": [],
+                "biggest_risk": "Technical failure",
+                "suggested_entry_offset_pct": 0,
+                "suggested_sl_offset_pct": 0,
+                "suggested_tp_offset_pct": 0,
+                "fallback_used": True,
+                "response_time_ms": int((time.monotonic() - t0) * 1000),
+            }
+
 
 
 async def _deliberate(member: dict, my_vote: dict, other_votes: list[dict]) -> dict:
@@ -493,14 +449,11 @@ async def run_boardroom(
 
     # ── ROUND 1: Independent blind votes ──────────────────────────────────
     logger.info("Round 1: Independent votes...")
-    if BOARDROOM_MODE == "single_claude":
-        votes = list(await asyncio.gather(*[
-            _cast_vote_with_mandate(m, market_snapshot, recent_lessons) for m in members
-        ]))
-    else:
-        votes = list(await asyncio.gather(*[
-            _cast_vote(m, market_snapshot, recent_lessons) for m in members
-        ]))
+    vote_tasks = [
+        _cast_vote(m, market_snapshot, recent_lessons)
+        for m in members
+    ]
+    votes = list(await asyncio.gather(*vote_tasks))
     logger.info("Round 1 complete: {}", [v["vote"] for v in votes])
 
     # ── ROUND 2: Deliberation (skip when only one member is active) ──────
@@ -548,13 +501,27 @@ async def run_boardroom(
     ) or "No lessons yet."
     cf_text = "\n".join(f"- {i}" for i in counterfactual_insights) or "No counterfactual data yet."
 
+    changed_count = sum(
+        1 for d in deliberations if d.get("final_vote") != d.get("original_vote")
+    )
+    deliberation_change_rate = round(changed_count / max(len(deliberations), 1), 2)
+    avg_response_ms = int(sum(v.get("response_time_ms", 0) for v in votes) / max(len(votes), 1))
+
     boardroom_record = {
         "votes": votes,
         "deliberations": deliberations,
         "vote_tally": vote_tally,
         "rounds": 2 if len(members) > 1 else 1,
         "active_members": [m["name"] for m in members],
+        "deliberation_change_rate": deliberation_change_rate,
+        "avg_vote_response_ms": avg_response_ms,
+        "model_response_times": {
+            v["member"]: v.get("response_time_ms", 0)
+            for v in votes
+        },
+        "fallbacks_used": sum(1 for v in votes if v.get("fallback_used", False)),
     }
+
 
     try:
         chair_system = prompts.BOARDROOM_CHAIR.format(
@@ -611,3 +578,30 @@ async def run_boardroom(
             "key_signals": [],
             "boardroom": boardroom_record,
         }
+
+async def run_market_regime_agent(instrument: str, snapshot: dict, iv_snapshot: dict) -> dict:
+    """Invoked after 6 consecutive mathematical skips to reassess regime."""
+    prompt = f"""The mathematical SMC system has skipped trading for ~3 hours due to chop/lack of setups.
+We need to know if we should sell options premium or force a boardroom run.
+
+Instrument: {instrument}
+Market Snapshot: {json.dumps(snapshot)}
+IV Snapshot: {json.dumps(iv_snapshot)}
+
+Output JSON ONLY:
+{{
+  "action": "route_options" | "route_boardroom" | "wait",
+  "direction": "long" | "short" | "neutral",
+  "conviction": 1-10,
+  "reasoning": "string"
+}}
+If IV is high/extreme and market is ranging, return route_options + neutral.
+If market is squeezing heavily with an imminent breakout, return route_boardroom.
+Otherwise wait.
+"""
+    raw = await _call_google("gemini-2.5-flash", "You are the Market Regime Assessor.", prompt)
+    try:
+        return json.loads(_strip_json_fences(raw))
+    except Exception as e:
+        logger.error(f"Failed to parse regime agent: {e}")
+        return {"action": "wait", "reasoning": str(e)}

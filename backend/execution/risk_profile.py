@@ -16,7 +16,7 @@ from backend.db.models import RiskProfile, Trade
 IST = timezone(timedelta(hours=5, minutes=30))
 
 VALID_MODES = ("ADVISORY", "SEMI_AUTO", "AUTONOMOUS", "SCHEDULED")
-VALID_SIZING = ("FIXED", "DYNAMIC", "KELLY")
+VALID_SIZING = ("FIXED", "DYNAMIC", "KELLY", "EDGE")
 
 # Field validation: name -> (min, max) or tuple of allowed values
 _NUMERIC_BOUNDS: dict[str, tuple[float, float]] = {
@@ -62,7 +62,7 @@ _PROFILE_FIELDS = set(_NUMERIC_BOUNDS) | {
     "avoid_weekends", "allow_chair_override", "mode",
     "trail_method", "allow_position_assessment",
     "max_rr_cap", "vision_mode",
-    "preferred_entry_mode", "options_enabled",
+    "preferred_entry_mode", "options_enabled", "active_instruments",
 }
 
 
@@ -124,6 +124,7 @@ class RiskProfileManager:
             "scan_interval_london_mins": row.scan_interval_london_mins,
             "scan_interval_us_mins": row.scan_interval_us_mins,
             "scan_interval_overnight_mins": row.scan_interval_overnight_mins,
+            "active_instruments": row.active_instruments or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"],
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
 
@@ -178,6 +179,9 @@ class RiskProfileManager:
             elif key in ("avoid_weekends", "allow_chair_override",
                          "allow_position_assessment", "options_enabled"):
                 value = bool(value)
+            elif key == "active_instruments":
+                if not isinstance(value, list):
+                    raise ValueError("active_instruments must be a list of strings")
             clean[key] = value
 
         async with AsyncSessionLocal() as session:
@@ -281,6 +285,17 @@ class RiskProfileManager:
             if in_window:
                 return False, f"inside blackout window {window}"
         return True, ""
+
+    async def is_trading_hours(self) -> bool:
+        """Check if current time is within trading hours and not on weekend or blackout window."""
+        profile = await self.get_profile()
+        now_ist = datetime.now(IST)
+        ok, _ = self._in_trading_hours(profile, now_ist)
+        if not ok:
+            return False
+        if profile.get("avoid_weekends") and now_ist.weekday() >= 5:
+            return False
+        return True
 
     async def validate_setup(
         self,
@@ -410,7 +425,7 @@ class RiskProfileManager:
     # Position sizing
     # ------------------------------------------------------------------
 
-    def calculate_position_size(
+    async def calculate_position_size(
         self,
         risk_per_trade_pct: float,
         entry_price: float,
@@ -422,52 +437,241 @@ class RiskProfileManager:
         max_position_size_pct: float = 3.0,
         avg_rr_ratio: float = 1.5,
         total_capital: float | None = None,
+        edge_factor: float | None = None,
+        pattern_type: str = "general_smc",
+        session: str = "us_london",
+        instrument: str = "BTCUSD_PERP",
     ) -> dict:
-        sl_distance_pct = abs(entry_price - stop_loss_price) / entry_price * 100
-        if sl_distance_pct <= 0:
-            sl_distance_pct = 0.5  # defensive fallback
+        """
+        Calculate position size based on sizing_mode.
 
-        base_size = risk_per_trade_pct / sl_distance_pct
+        FIXED:  Same risk every trade. Simplest and most reliable.
+        DYNAMIC: Scale with setup score.
+        EDGE:   Scale with measured historical edge per pattern type.
+                Only use after 30+ trades of history, fallback to FIXED.
+        KELLY:  Fractional Kelly Criterion based on overall win rate.
+                Only use after 50+ trades.
+        """
+        risk_distance = abs(entry_price - stop_loss_price)
+        risk_distance_pct = risk_distance / entry_price * 100 if entry_price else 0.5
+        if risk_distance_pct <= 0:
+            risk_distance_pct = 0.5  # defensive fallback
+
+        base_size = risk_per_trade_pct / risk_distance_pct
         capital = total_capital or available_margin
         multiplier = 1.0
         mode_used = sizing_mode
+        rationale = ""
 
-        if sizing_mode == "DYNAMIC":
+        if sizing_mode == "FIXED":
+            position_size_pct = base_size
+            multiplier = 1.0
+            rationale = f"FIXED mode: {risk_per_trade_pct}% risk target"
+
+        elif sizing_mode == "DYNAMIC":
             if setup_score >= 8.5:
                 multiplier = 1.5
             elif setup_score >= 7.5:
                 multiplier = 1.25
             elif setup_score >= 6.5:
                 multiplier = 1.0
+            elif setup_score >= 6.0:
+                multiplier = 0.75
             else:
                 multiplier = 0.5
-            size = base_size * multiplier
-        elif sizing_mode == "KELLY" and win_rate_history is not None:
-            kelly = win_rate_history - ((1 - win_rate_history) / max(avg_rr_ratio, 0.1))
-            size = max(0.1, kelly * 0.25 * 100)  # fractional Kelly as % of capital
-            multiplier = 0.25
-        else:
-            mode_used = "FIXED" if sizing_mode == "KELLY" else sizing_mode
-            size = base_size
 
-        final_size = round(min(size, max_position_size_pct), 2)
-        risk_amount = capital * risk_per_trade_pct / 100
+            position_size_pct = base_size * multiplier
+            rationale = f"DYNAMIC mode: score {setup_score:.1f} → {multiplier}x multiplier"
+
+        elif sizing_mode == "EDGE":
+            if edge_factor is not None:
+                # Use passed edge_factor (win rate) to set multiplier for testing/override
+                if edge_factor > 0.65:
+                    multiplier = 1.5
+                elif edge_factor > 0.55:
+                    multiplier = 1.25
+                elif edge_factor > 0.45:
+                    multiplier = 1.0
+                elif edge_factor > 0.35:
+                    multiplier = 0.75
+                else:
+                    multiplier = 0.5
+                position_size_pct = base_size * multiplier
+                rationale = f"EDGE mode (using edge_factor={edge_factor:.3f}) → {multiplier}x multiplier"
+            else:
+                # Scale with measured historical edge per pattern
+                edge_data = await self._get_pattern_edge_stats(pattern_type, session, instrument)
+
+                if edge_data is None or edge_data["sample_size"] < 30:
+                    # Insufficient history — fall back to FIXED
+                    position_size_pct = base_size
+                    multiplier = 1.0
+                    sample = edge_data["sample_size"] if edge_data else 0
+                    rationale = (
+                        f"EDGE mode → FIXED fallback: "
+                        f"insufficient history for {pattern_type} "
+                        f"(n={sample}, need 30+)"
+                    )
+                else:
+                    expectancy = edge_data["expectancy"]
+                    win_rate = edge_data["win_rate_pct"] / 100
+
+                    if expectancy > 0.5 and win_rate > 0.65:
+                        multiplier = 1.5   # Strong edge
+                    elif expectancy > 0.3 and win_rate > 0.55:
+                        multiplier = 1.25  # Good edge
+                    elif expectancy > 0.1 and win_rate > 0.45:
+                        multiplier = 1.0   # Acceptable edge
+                    elif expectancy > 0:
+                        multiplier = 0.75  # Weak positive edge
+                    else:
+                        multiplier = 0.0   # Negative expectancy — skip
+                        logger.warning(
+                            "EDGE mode: negative expectancy for {} ({:.3f}) — sizing to 0, skipping",
+                            pattern_type, expectancy
+                        )
+
+                    position_size_pct = base_size * multiplier
+                    rationale = (
+                        f"EDGE mode: {pattern_type} in {session} — "
+                        f"win rate {win_rate*100:.0f}%, expectancy {expectancy:.3f} "
+                        f"(n={edge_data['sample_size']}) → {multiplier}x multiplier"
+                    )
+
+        elif sizing_mode == "KELLY":
+            # Fractional Kelly — needs overall win rate history
+            overall_stats = await self._get_overall_stats()
+
+            if overall_stats["total_trades"] < 50:
+                # Fall back to FIXED
+                position_size_pct = base_size
+                multiplier = 1.0
+                mode_used = "FIXED"
+                rationale = f"KELLY → FIXED fallback: need 50 trades, have {overall_stats['total_trades']}"
+            else:
+                win_rate = overall_stats["win_rate"]
+                avg_rr = overall_stats["avg_rr_achieved"]
+
+                # Kelly formula: win_rate - ((1 - win_rate) / avg_rr)
+                kelly_pct = win_rate - ((1 - win_rate) / avg_rr) if avg_rr > 0 else 0
+                fractional_kelly = kelly_pct * 0.25  # 25% of Kelly for safety
+
+                # kelly percentage of capital
+                position_size_pct = max(fractional_kelly * 100, 0.0)
+                multiplier = fractional_kelly * 100 / base_size if base_size else 1.0
+                rationale = (
+                    f"KELLY mode: win={win_rate:.0%}, avg_rr={avg_rr:.2f} → "
+                    f"Kelly={kelly_pct:.3f}, fractional={fractional_kelly:.3f} (size={position_size_pct:.2f}%)"
+                )
+
+        else:
+            # Unknown mode — use FIXED
+            position_size_pct = base_size
+            multiplier = 1.0
+            rationale = f"Unknown mode {sizing_mode} → FIXED"
+
+        final_size = round(min(position_size_pct, max_position_size_pct), 2)
+        risk_amount_inr = capital * final_size / 100
+        contracts = max(1, int(risk_amount_inr / (entry_price * risk_distance_pct / 100))) if entry_price and risk_distance_pct else 1
 
         detail = (
-            f"{mode_used}: risk {risk_per_trade_pct}% of ₹{capital:,.0f} = ₹{risk_amount:,.0f} | "
-            f"SL distance {sl_distance_pct:.2f}% → base size {base_size:.2f}% | "
-            f"multiplier {multiplier}x (setup {setup_score}) → final {final_size}% "
-            f"(cap {max_position_size_pct}%)"
+            f"{sizing_mode}: risk {risk_per_trade_pct}% of ₹{capital:,.0f} = ₹{risk_amount_inr:,.0f} | "
+            f"SL distance {risk_distance_pct:.2f}% → base size {base_size:.2f}% | "
+            f"multiplier {multiplier:.2f}x → final {final_size}% "
+            f"(cap {max_position_size_pct}%) | {rationale}"
         )
         logger.info("Position sizing: {}", detail)
         return {
             "position_size_pct": final_size,
-            "risk_amount_inr": round(risk_amount, 2),
-            "contracts": None,  # filled by executor from live margin
+            "risk_amount_inr": round(risk_amount_inr, 2),
+            "contracts": contracts,
             "sizing_mode_used": mode_used,
-            "multiplier_applied": multiplier,
+            "multiplier_applied": round(multiplier, 2),
             "calculation_detail": detail,
+            "rationale": rationale,
         }
+
+    async def _get_pattern_edge_stats(self, pattern_type: str, session: str, instrument: str) -> dict | None:
+        """Fetch pattern stats from pattern_outcomes table."""
+        from sqlalchemy import text
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(text("""
+                    SELECT
+                        COUNT(*) as sample_size,
+                        COALESCE(AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END)*100, 0.0) as win_rate_pct,
+                        COALESCE(AVG(rr_achieved), 0.0) as avg_rr,
+                        COALESCE(AVG(rr_achieved) * AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END)
+                        - (1.0 - AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END)), 0.0) as expectancy
+                    FROM pattern_outcomes
+                    WHERE pattern_type = :pattern_type AND session = :session AND instrument = :instrument
+                """), {"pattern_type": pattern_type, "session": session, "instrument": instrument})
+                
+                row = result.fetchone()
+                if row and row[0] >= 1:
+                    return {
+                        "sample_size": row[0],
+                        "win_rate_pct": float(row[1]),
+                        "avg_rr": float(row[2]),
+                        "expectancy": float(row[3])
+                    }
+                return None
+        except Exception:
+            logger.exception("Failed to get pattern edge stats")
+            return None
+
+    async def _get_overall_stats(self) -> dict:
+        """Fetch overall stats for Kelly sizing."""
+        from sqlalchemy import text
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(text("""
+                    SELECT
+                        COUNT(*) as total_trades,
+                        COALESCE(AVG(CASE WHEN pnl_pct > 0 THEN 1.0 ELSE 0.0 END), 0.0) as win_rate,
+                        COALESCE(AVG(CASE WHEN pnl_pct > 0 THEN pnl_pct ELSE NULL END), 1.0) /
+                        COALESCE(ABS(AVG(CASE WHEN pnl_pct <= 0 THEN pnl_pct ELSE NULL END)), 1.0) as avg_rr_achieved
+                    FROM trades
+                    WHERE status = 'closed' AND pnl_pct IS NOT NULL
+                """))
+                row = result.fetchone()
+                if row:
+                    return {
+                        "total_trades": row[0],
+                        "win_rate": float(row[1]),
+                        "avg_rr_achieved": float(row[2])
+                    }
+                return {"total_trades": 0, "win_rate": 0.0, "avg_rr_achieved": 1.5}
+        except Exception:
+            logger.exception("Failed to get overall stats")
+            return {"total_trades": 0, "win_rate": 0.0, "avg_rr_achieved": 1.5}
+
+    async def get_pattern_edge(self, pattern_type: str) -> float | None:
+        """Return historical win rate for a given pattern_type from closed trades.
+
+        Returns None if fewer than 5 samples exist (not enough data to trust).
+        Called before calculate_position_size when sizing_mode == 'EDGE'.
+        """
+        try:
+            from sqlalchemy import text
+            from backend.db.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                row = await db.execute(text("""
+                    SELECT
+                        COUNT(*) AS total,
+                        SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins
+                    FROM trades
+                    WHERE status = 'closed'
+                      AND trigger_event_type = :pattern_type
+                """), {"pattern_type": pattern_type})
+                rec = row.fetchone()
+                if rec and rec.total >= 5:
+                    return round(rec.wins / rec.total, 3)
+                return None
+        except Exception:
+            logger.exception("get_pattern_edge failed for {}", pattern_type)
+            return None
+
 
 
 risk_manager = RiskProfileManager()

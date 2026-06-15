@@ -35,7 +35,7 @@ class KeyLevelsEngine:
         "us_late": (23, 24),
     }
 
-    async def compute(self, instrument: str, current_price: float) -> dict:
+    async def compute(self, instrument: str, current_price: float, client: Any = None) -> dict:
         """Fetch required candles and compute daily, weekly, session and round levels."""
         symbol = to_delta_symbol(instrument)
         current_price = float(current_price or 0)
@@ -43,9 +43,9 @@ class KeyLevelsEngine:
         weekly: list[dict] = []
         hourly: list[dict] = []
         try:
-            daily = await self._fetch_daily_candles(symbol, 8)
-            weekly = await self._fetch_weekly_candles(symbol, 6)
-            hourly = await self._fetch_hourly_candles(symbol, 96)
+            daily = await self._fetch_daily_candles(symbol, 8, client)
+            weekly = await self._fetch_weekly_candles(symbol, 6, client)
+            hourly = await self._fetch_hourly_candles(symbol, 96, client)
         except Exception:
             logger.exception("Key level candle fetch failed for {}", instrument)
 
@@ -122,14 +122,24 @@ class KeyLevelsEngine:
         }
         return notes.get(instrument, {}).get(session, "")
 
-    async def _fetch_daily_candles(self, instrument: str, count: int) -> list:
-        return await delta_client.get_candles(instrument, "1440", count)
+    async def _fetch_daily_candles(self, instrument: str, count: int, client: Any = None) -> list:
+        c = client or delta_client
+        if hasattr(c, "get"):
+            return await c.get("candles_1d")
+        return await c.get_candles(instrument, "1440", count)
 
-    async def _fetch_weekly_candles(self, instrument: str, count: int) -> list:
-        return await delta_client.get_candles(instrument, "10080", count)
+    async def _fetch_weekly_candles(self, instrument: str, count: int, client: Any = None) -> list:
+        c = client or delta_client
+        if hasattr(c, "get"):
+            return await c.get("candles_1w")
+        return await c.get_candles(instrument, "10080", count)
 
-    async def _fetch_hourly_candles(self, instrument: str, count: int) -> list:
-        return await delta_client.get_candles(instrument, "60", count)
+    async def _fetch_hourly_candles(self, instrument: str, count: int, client: Any = None) -> list:
+        c = client or delta_client
+        if hasattr(c, "get"):
+            return await c.get("candles_1h")
+        return await c.get_candles(instrument, "60", count)
+
 
     def _compute_session_levels(self, hourly_candles: list, instrument: str) -> dict:
         grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)

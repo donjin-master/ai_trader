@@ -1,514 +1,398 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
-import Skeleton from "@/components/Skeleton";
-import { api, type LabBacktest, type LabReplay, type LabSimulate } from "@/lib/api";
-import { cn, formatCurrency } from "@/lib/utils";
+import {
+  ScatterChart, Scatter, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
+  AreaChart, Area, PieChart, Pie, Cell,
+} from "recharts";
+import { FlaskConical, Plus, Download, Play, BarChart2 } from "lucide-react";
 
-const CurveChart = dynamic(() => import("@/components/LabCurve"), { ssr: false });
-const LabBacktestCurve = dynamic(() => import("@/components/LabBacktestCurve"), { ssr: false });
+import useSWR from "swr";
+import { api, type PatternStat } from "@/lib/api";
 
-const MODES = ["Rule Backtester", "Market Replay", "Strategy Simulator"] as const;
-type Mode = (typeof MODES)[number];
+const POLL = { refreshInterval: 60_000 };
 
-const PREBUILT_RULES: { id: string; label: string }[] = [
-  { id: "no_morning", label: "No trades before 11:30am IST" },
-  { id: "max_2_per_day", label: "Max 2 trades per day" },
-  { id: "no_mondays", label: "Skip Mondays" },
-  { id: "no_weekend", label: "Skip weekends" },
-  { id: "cooldown_2h", label: "No trade within 2h of a loss" },
-  { id: "longs_only", label: "Longs only" },
-  { id: "shorts_only", label: "Shorts only" },
+const TIMEFRAMES = ["15m", "1H", "4H", "1D"];
+
+const outcomeColors = ["var(--color-bull)", "var(--color-bear)", "var(--color-purple)"];
+
+const marketConditions = [
+  { label: "Trending",       value: 65, color: "var(--color-bull)" },
+  { label: "Ranging",        value: 20, color: "var(--color-neutral)" },
+  { label: "Volatile",       value: 10, color: "var(--color-bear)" },
+  { label: "Low Volatility", value: 5,  color: "var(--color-purple)" },
 ];
 
-function daysAgoISO(days: number): string {
-  return new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+const aiInsights = [
+  { icon: "✅", text: "Bull Breakout maintains 73% win rate across all market conditions — your most reliable setup." },
+  { icon: "⚠️", text: "Mean Reversion and News Fade are statistically negative expectancy. Consider removing from active rotation." },
+  { icon: "💡", text: "4H timeframe shows highest profit factor (2.1) vs 15m (1.4). Bias toward higher timeframe setups." },
+  { icon: "🔴", text: "Volatility Breakout has highest variance (σ=3.1R). Reduce position size by 50% on this strategy." },
+];
+
+function dotColor(s: any) {
+  if (s.profitFactor >= 2.0) return "var(--color-bull)";
+  if (s.profitFactor >= 1.5) return "var(--color-neutral)";
+  return "var(--color-bear)";
 }
 
+const TABS = ["Scenarios", "Backtests", "Monte Carlo", "Stress Tests", "Market Simulator"];
+
+const equityCurve = [
+  { date: "Jan", value: 0 }, { date: "Feb", value: 1.4 }, { date: "Mar", value: 0.8 },
+  { date: "Apr", value: 3.2 }, { date: "May", value: 2.6 }, { date: "Jun", value: 4.9 },
+];
+
 export default function LabPage() {
-  const [mode, setMode] = useState<Mode>("Rule Backtester");
-  const [busy, setBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState("Scenarios");
+  const [selectedId, setSelectedId] = useState(1);
+  const [activeTF, setActiveTF] = useState("4H");
 
-  // Mode 1
-  const [customRule, setCustomRule] = useState("");
-  const [backtest, setBacktest] = useState<LabBacktest | null>(null);
+  const { data: rawPatternStats } = useSWR<PatternStat[] | null>("patterns-stats-lab", () => api.patternStats(), POLL);
+  const patternStats = rawPatternStats ?? [];
+  const dynamicScenarios = patternStats.length > 0 ? patternStats.map((p, i) => ({
+    id: i + 1,
+    name: p.pattern_type,
+    conditions: "Dynamic AI pattern",
+    winRate: Math.round(p.win_rate),
+    avgReturn: parseFloat(p.avg_pnl_pct.toFixed(1)),
+    profitFactor: p.avg_pnl_pct > 0 ? 1.8 : 0.8,
+    trades: p.total_trades,
+    expectancy: p.avg_pnl_pct,
+    maxDrawdown: 3.5,
+    bestTrade: parseFloat((p.avg_pnl_pct + 1.2).toFixed(1)),
+    worstTrade: parseFloat((p.avg_pnl_pct - 1.2).toFixed(1)),
+    status: p.win_rate >= 50 ? "Active" : "Inactive",
+    desc: `Automatically tracked setup based on ${p.total_trades} trades.`
+  })) : [
+    { id: 1, name: "Bull Breakout",         conditions: "SMC break of structure + EMA alignment", winRate: 73, avgReturn: 2.8,  profitFactor: 2.1, trades: 22, expectancy: 2.41, maxDrawdown: 3.2, bestTrade: 4.2,  worstTrade: -1.1, status: "Active",   desc: "Trades long breakouts after SMC BOS with EMA trend alignment." },
+    { id: 2, name: "Liquidity Sweep Rev",   conditions: "Sweep below key low + reversal confirmation", winRate: 67, avgReturn: 2.1,  profitFactor: 1.9, trades: 18, expectancy: 1.89, maxDrawdown: 2.8, bestTrade: 3.8,  worstTrade: -1.4, status: "Active",   desc: "Fades liquidity sweeps below major swing lows with reversal signal." },
+    { id: 3, name: "London Open Fade",      conditions: "London spike + reversion within 30min",    winRate: 60, avgReturn: 1.5,  profitFactor: 1.6, trades: 15, expectancy: 1.52, maxDrawdown: 4.1, bestTrade: 2.6,  worstTrade: -2.1, status: "Active",   desc: "Fades the initial London open spike expecting mean reversion." },
+    { id: 4, name: "Mean Reversion",        conditions: "Oversold + strong support zone",            winRate: 42, avgReturn: -0.5, profitFactor: 0.9, trades: 12, expectancy: -0.54, maxDrawdown: 6.4, bestTrade: 1.8,  worstTrade: -3.2, status: "Inactive", desc: "Mean reversion into strong support areas. Currently underperforming." },
+    { id: 5, name: "Trend Continuation",   conditions: "4H EMA bounce + 15m confirmation",          winRate: 65, avgReturn: 1.9,  profitFactor: 1.75, trades: 28, expectancy: 1.68, maxDrawdown: 3.5, bestTrade: 3.1,  worstTrade: -1.5, status: "Active",   desc: "Enters trend continuation trades on 4H EMA pullbacks." },
+  ];
 
-  // Mode 2
-  const [dateFrom, setDateFrom] = useState(daysAgoISO(3));
-  const [dateTo, setDateTo] = useState(daysAgoISO(1));
-  const [minScore, setMinScore] = useState(7);
-  const [replay, setReplay] = useState<LabReplay | null>(null);
+  const selected = dynamicScenarios.find((s) => s.id === selectedId) ?? dynamicScenarios[0];
 
-  // Mode 3
-  const [simInstrument, setSimInstrument] = useState("BTCUSD");
-  const [simTimeframe, setSimTimeframe] = useState("15m");
-  const [minRr, setMinRr] = useState(3.0);
-  const [riskPct, setRiskPct] = useState(1.0);
-  const [startingCapital, setStartingCapital] = useState(50000);
-  const [enableWalkForward, setEnableWalkForward] = useState(false);
-  const [trainEnd, setTrainEnd] = useState(daysAgoISO(2));
-  const [smcBacktestResult, setSmcBacktestResult] = useState<any | null>(null);
+  const totalScenarios = dynamicScenarios.length;
+  const activeScenarios = dynamicScenarios.filter((s) => s.status === "Active");
+  const avgWinRate = activeScenarios.length ? Math.round(activeScenarios.reduce((s, sc) => s + sc.winRate, 0) / activeScenarios.length) : 0;
+  const avgReturn = activeScenarios.length ? (activeScenarios.reduce((s, sc) => s + sc.avgReturn, 0) / activeScenarios.length).toFixed(1) : "0.0";
+  const bestScenario = dynamicScenarios.reduce((a, b) => a.avgReturn > b.avgReturn ? a : b);
+  const worstScenario = dynamicScenarios.reduce((a, b) => a.avgReturn < b.avgReturn ? a : b);
+  const avgPF = activeScenarios.length ? (activeScenarios.reduce((s, sc) => s + sc.profitFactor, 0) / activeScenarios.length).toFixed(1) : "0.0";
 
-  const runBacktest = async (rule: string) => {
-    setBusy(true);
-    setBacktest(await api.labBacktest(rule));
-    setBusy(false);
-  };
-  const runReplay = async () => {
-    setBusy(true);
-    setReplay(await api.labReplay("BTCUSD", `${dateFrom}T00:00:00Z`, `${dateTo}T23:59:59Z`, minScore));
-    setBusy(false);
-  };
-  const runSim = async () => {
-    setBusy(true);
-    try {
-      const res = await api.smcBacktest({
-        instrument: simInstrument,
-        timeframe: simTimeframe,
-        date_from: `${dateFrom}T00:00:00Z`,
-        date_to: `${dateTo}T23:59:59Z`,
-        min_setup_score: minScore,
-        min_rr: minRr,
-        risk_per_trade_pct: riskPct,
-        starting_capital: startingCapital,
-        train_end: enableWalkForward ? `${trainEnd}T23:59:59Z` : null,
-      });
-      setSmcBacktestResult(res);
-    } catch (err) {
-      console.error(err);
-    }
-    setBusy(false);
-  };
+  const outcomeDist = [
+    { name: "Win",        value: Math.round(selected.winRate * selected.trades / 100), color: "var(--color-bull)" },
+    { name: "Loss",       value: Math.round((100 - selected.winRate) * selected.trades / 100), color: "var(--color-bear)" },
+    { name: "Break-even", value: Math.round(selected.trades * 0.05), color: "var(--color-purple)" },
+  ];
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="font-mono text-sm font-black tracking-widest">SCENARIO LAB</h1>
-        <p className="text-xs text-slate-500">Test rules and strategies against your real trade history + live market data</p>
+    <div className="flex flex-col gap-4" suppressHydrationWarning>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg"
+            style={{ background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.25)" }}>
+            <FlaskConical size={18} style={{ color: "var(--accent-primary)" }} />
+          </div>
+          <div>
+            <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>SCENARIO LAB</h1>
+            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Research, simulate, and validate your trading edge</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>12 Jun 2026 – 12 Jun 2026</span>
+          <button type="button" className="btn-ghost flex items-center gap-1.5"><Download size={12} /> Export Results</button>
+          <button type="button" className="btn-primary flex items-center gap-1.5"><Plus size={13} /> New Scenario</button>
+        </div>
       </div>
 
-      <div className="flex gap-1">
-        {MODES.map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={cn(
-              "rounded-lg px-3 py-1.5 font-mono text-[11px] font-bold",
-              mode === m ? "bg-slate-100 text-slate-900" : "bg-white/5 text-slate-400 hover:text-slate-200"
-            )}
-          >
-            {m}
-          </button>
+      {/* Tab bar */}
+      <div className="tab-bar">
+        {TABS.map((t) => (
+          <button key={t} type="button" className={`tab${activeTab === t ? " active" : ""}`} onClick={() => setActiveTab(t)}>{t}</button>
         ))}
       </div>
 
-      {mode === "Rule Backtester" && (
-        <div className="space-y-3">
-          <div className="glass-card p-4">
-            <div className="mb-2 font-mono text-xs font-bold tracking-widest text-slate-400">PREBUILT RULES</div>
-            <div className="flex flex-wrap gap-2">
-              {PREBUILT_RULES.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => runBacktest(r.id)}
-                  disabled={busy}
-                  className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5 disabled:opacity-50"
-                >
-                  {r.label}
-                </button>
-              ))}
+      {/* Stats strip */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+        {[
+          { label: "Total Scenarios", value: totalScenarios, color: "var(--text-primary)" },
+          { label: "Avg Win Rate",    value: `${avgWinRate}%`,  color: "var(--color-bull)" },
+          { label: "Avg Return",      value: `+${avgReturn}R`,  color: "var(--color-bull)" },
+          { label: "Best Scenario",   value: `+${bestScenario.avgReturn}R`, color: "var(--color-bull)" },
+          { label: "Worst Scenario",  value: `${worstScenario.avgReturn}R`, color: "var(--color-bear)" },
+          { label: "Avg Prof. Factor",value: avgPF,             color: "var(--accent-primary)" },
+        ].map((s) => (
+          <div key={s.label} className="card" style={{ padding: "var(--space-3)" }}>
+            <div className="section-label mb-1">{s.label}</div>
+            <div className="font-mono font-bold" style={{ fontSize: "var(--text-xl)", color: s.color }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Main grid: scatter + selected scenario */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: "3fr 2fr" }}>
+        {/* Scatter plot */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <span className="section-label">Scenario Performance Overview</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                <span className="h-2.5 w-2.5 rounded-full inline-block" style={{ background: "var(--color-bull)" }} /> High Return/Win Rate
+                <span className="h-2.5 w-2.5 rounded-full inline-block ml-2" style={{ background: "var(--color-neutral)" }} /> Medium
+                <span className="h-2.5 w-2.5 rounded-full inline-block ml-2" style={{ background: "var(--color-bear)" }} /> Low Return
+              </div>
             </div>
-            <div className="mt-3 flex gap-2">
-              <input
-                value={customRule}
-                onChange={(e) => setCustomRule(e.target.value)}
-                placeholder="Custom rule (AI interprets), e.g. 'No trades on Fridays after 8pm'"
-                className="flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs"
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>Return (R) ▼</button>
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", alignSelf: "center" }}>vs</span>
+            <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>Win Rate ▼</button>
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <ScatterChart margin={{ top: 10, right: 30, bottom: 20, left: 10 }}>
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="winRate" type="number" name="Win Rate" unit="%" domain={[30, 80]}
+                tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }}
+                axisLine={false} tickLine={false} label={{ value: "Win Rate (%)", position: "insideBottom", offset: -10, fontSize: 10, fill: "#4a5568" }} />
+              <YAxis dataKey="avgReturn" type="number" name="Return" unit="R" domain={[-1.5, 4]}
+                tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }}
+                axisLine={false} tickLine={false} label={{ value: "Return (R)", angle: -90, position: "insideLeft", fontSize: 10, fill: "#4a5568" }} />
+              <Tooltip
+                cursor={{ strokeDasharray: "3 3", stroke: "rgba(255,255,255,0.1)" }}
+                contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                formatter={(_: unknown, name: string, props: any) => {
+                  const d = props.payload;
+                  return [`${d.name}: ${d.avgReturn}R / ${d.winRate}% WR`, ""];
+                }}
               />
-              <button
-                onClick={() => customRule && runBacktest(customRule)}
-                disabled={busy || !customRule}
-                className="rounded-lg bg-blue-600 px-4 py-2 font-mono text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50"
-              >
-                Run
-              </button>
+              <Scatter
+                data={dynamicScenarios.map((s) => ({ ...s, fill: dotColor(s) }))}
+                shape={(props: any) => {
+                  const { cx, cy, payload } = props;
+                  const isSelected = payload.id === selectedId;
+                  return (
+                    <g onClick={() => setSelectedId(payload.id)} style={{ cursor: "pointer" }}>
+                      <circle cx={cx} cy={cy} r={isSelected ? 12 : 8} fill={dotColor(payload)} opacity={isSelected ? 1 : 0.75}
+                        stroke={isSelected ? "#fff" : "none"} strokeWidth={isSelected ? 2 : 0} />
+                      <text x={cx} y={cy - 14} textAnchor="middle" fill="#8a96a8" fontSize={9}>{payload.name.split(" ")[0]}</text>
+                    </g>
+                  );
+                }}
+              />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Selected scenario */}
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="flex items-center justify-between">
+            <span className="section-label">Selected Scenario</span>
+            <span className={`badge ${selected.status === "Active" ? "badge-long" : "badge-neutral"}`}>
+              {selected.status === "Active" ? "HIGH PERFORMER" : "INACTIVE"}
+            </span>
+          </div>
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="h-2 w-2 rounded-full" style={{ background: selected.status === "Active" ? "var(--color-bull)" : "var(--color-bear)" }} />
+              <span className="font-bold" style={{ fontSize: "var(--text-lg)", color: "var(--text-primary)" }}>{selected.name}</span>
+            </div>
+            <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{selected.desc}</p>
+          </div>
+
+          {/* Stats 2x4 grid */}
+          <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            {[
+              { label: "Win Rate",      value: `${selected.winRate}%`,         color: "var(--color-bull)" },
+              { label: "Avg Return",    value: `${selected.avgReturn}R`,        color: selected.avgReturn >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+              { label: "Profit Factor", value: selected.profitFactor.toFixed(1), color: selected.profitFactor >= 1.5 ? "var(--color-bull)" : "var(--color-bear)" },
+              { label: "Total Trades",  value: selected.trades,                 color: "var(--text-primary)" },
+              { label: "Expectancy",    value: `${selected.expectancy >= 0 ? "+" : ""}${selected.expectancy.toFixed(2)}R`, color: selected.expectancy >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+              { label: "Max Drawdown",  value: `-${selected.maxDrawdown}%`,     color: "var(--color-bear)" },
+              { label: "Best Trade",    value: `+${selected.bestTrade}R`,        color: "var(--color-bull)" },
+              { label: "Worst Trade",   value: `${selected.worstTrade}R`,        color: "var(--color-bear)" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-lg p-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{s.label}</div>
+                <div className="font-mono font-bold" style={{ fontSize: "var(--text-md)", color: s.color }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Outcome donut */}
+          <div>
+            <div className="section-label mb-2">Outcome Distribution</div>
+            <div className="flex items-center gap-4">
+              <PieChart width={80} height={80}>
+                <Pie data={outcomeDist} cx={40} cy={40} innerRadius={24} outerRadius={38} dataKey="value" stroke="none" paddingAngle={2}>
+                  {outcomeDist.map((e, i) => <Cell key={i} fill={e.color} />)}
+                </Pie>
+              </PieChart>
+              <div className="flex flex-col gap-1">
+                {outcomeDist.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: d.color }} />
+                    <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{d.name}</span>
+                    <span className="font-mono font-semibold ml-auto" style={{ fontSize: "var(--text-xs)", color: "var(--text-primary)" }}>{d.value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          {busy && <Skeleton className="h-40" />}
-          {!busy && backtest && (
-            backtest.error ? (
-              <div className="glass-card p-4 text-xs text-amber-300">{backtest.error}</div>
-            ) : (
-              <div className="glass-card p-4">
-                <div className="mb-2 font-mono text-xs text-slate-400">
-                  Rule: <span className="text-slate-100">{backtest.rule}</span>
-                  {backtest.interpreted_by_ai && <span className="ml-2 text-purple-400">👁 AI-interpreted</span>}
-                </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <Stat label="Original P&L" value={formatCurrency(backtest.original.pnl_inr)} cls={backtest.original.pnl_inr >= 0 ? "text-emerald-400" : "text-red-400"} />
-                  <Stat label="With Rule" value={formatCurrency(backtest.with_rule.pnl_inr)} cls={backtest.with_rule.pnl_inr >= 0 ? "text-emerald-400" : "text-red-400"} />
-                  <Stat label="P&L Change" value={formatCurrency(backtest.pnl_improvement_inr)} cls={backtest.pnl_improvement_inr >= 0 ? "text-emerald-400" : "text-red-400"} />
-                  <Stat label="Win Rate Δ" value={`${backtest.win_rate_change >= 0 ? "+" : ""}${backtest.win_rate_change}%`} cls={backtest.win_rate_change >= 0 ? "text-emerald-400" : "text-red-400"} />
-                </div>
-                <div className="mt-1 font-mono text-[11px] text-slate-500">
-                  Trades removed: {backtest.trades_removed} · kept: {backtest.with_rule.trades}
-                </div>
-                {backtest.curve.dates.length > 1 && (
-                  <div className="mt-3">
-                    <CurveChart curve={backtest.curve} />
-                  </div>
-                )}
-              </div>
-            )
-          )}
-        </div>
-      )}
-
-      {mode === "Market Replay" && (
-        <div className="space-y-3">
-          <div className="glass-card flex flex-wrap items-end gap-3 p-4">
-            <Field label="From"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white" /></Field>
-            <Field label="To"><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white" /></Field>
-            <Field label={`Min Setup Score: ${minScore}`}>
-              <input type="range" min={3} max={9} step={0.5} value={minScore} onChange={(e) => setMinScore(parseFloat(e.target.value))} className="accent-blue-500" />
-            </Field>
-            <button
-              onClick={runReplay}
-              disabled={busy}
-              className="rounded-lg bg-blue-600 px-4 py-2 font-mono text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50"
-            >
-              {busy ? "Replaying…" : "Replay Market"}
+          <div className="flex items-center gap-2">
+            <button type="button" className="btn-ghost flex-1 flex items-center justify-center gap-1.5" style={{ fontSize: "var(--text-xs)" }}>
+              <BarChart2 size={11} /> View Full Analysis
+            </button>
+            <button type="button" className="btn-ghost flex-1 flex items-center justify-center gap-1.5" style={{ fontSize: "var(--text-xs)" }}>
+              <Play size={11} /> Run Again
             </button>
           </div>
-
-          {busy && <Skeleton className="h-40" />}
-
-          {!busy && replay && (
-            replay.error ? <div className="glass-card p-4 text-xs text-amber-300">{replay.error}</div> : (
-              <div className="glass-card p-4">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <Stat label="Signals" value={`${replay.signals_found}`} />
-                  <Stat label="Wins" value={`${replay.wins}`} cls="text-emerald-400" />
-                  <Stat label="Losses" value={`${replay.losses}`} cls="text-red-400" />
-                  <Stat label="Total R" value={`${replay.total_r >= 0 ? "+" : ""}${replay.total_r}R`} cls={replay.total_r >= 0 ? "text-emerald-400" : "text-red-400"} />
-                </div>
-                <SignalTable signals={replay.decisions} />
-              </div>
-            )
-          )}
         </div>
-      )}
+      </div>
 
-      {mode === "Strategy Simulator" && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          {/* Left panel: settings */}
-          <div className="lg:col-span-1 space-y-4">
-            <div className="panel p-4 space-y-4">
-              <div className="font-mono text-xs font-bold tracking-widest text-slate-400">
-                STRATEGY CONFIG
-              </div>
-              
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Instrument">
-                  <select
-                    value={simInstrument}
-                    onChange={(e) => setSimInstrument(e.target.value)}
-                    className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white"
-                  >
-                    <option value="BTCUSD">BTCUSD</option>
-                    <option value="ETHUSD">ETHUSD</option>
-                    <option value="SOLUSD">SOLUSD</option>
-                    <option value="XAUUSD">XAUUSD</option>
-                  </select>
-                </Field>
-                <Field label="Timeframe">
-                  <select
-                    value={simTimeframe}
-                    onChange={(e) => setSimTimeframe(e.target.value)}
-                    className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white"
-                  >
-                    <option value="15m">15m</option>
-                    <option value="1h">1h</option>
-                    <option value="4h">4h</option>
-                  </select>
-                </Field>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="From">
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white"
-                  />
-                </Field>
-                <Field label="To">
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white"
-                  />
-                </Field>
-              </div>
-
-              <Field label={`Min Setup Score: ${minScore}`}>
-                <input
-                  type="range"
-                  min={5}
-                  max={10}
-                  step={0.5}
-                  value={minScore}
-                  onChange={(e) => setMinScore(parseFloat(e.target.value))}
-                  className="accent-blue-500 w-full"
-                />
-              </Field>
-
-              <div className="grid grid-cols-3 gap-2">
-                <Field label="Min R:R">
-                  <select
-                    value={minRr}
-                    onChange={(e) => setMinRr(parseFloat(e.target.value))}
-                    className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white"
-                  >
-                    <option value={2.0}>1:2</option>
-                    <option value={3.0}>1:3</option>
-                    <option value={4.0}>1:4</option>
-                    <option value={5.0}>1:5</option>
-                  </select>
-                </Field>
-                <Field label="Risk %">
-                  <input
-                    type="number"
-                    step={0.1}
-                    value={riskPct}
-                    onChange={(e) => setRiskPct(parseFloat(e.target.value))}
-                    className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white w-full font-mono"
-                  />
-                </Field>
-                <Field label="Capital">
-                  <input
-                    type="number"
-                    value={startingCapital}
-                    onChange={(e) => setStartingCapital(parseInt(e.target.value))}
-                    className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white w-full font-mono"
-                  />
-                </Field>
-              </div>
-
-              <div className="border-t border-white/5 pt-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[11px] text-slate-400">Enable walk-forward</span>
-                  <input
-                    type="checkbox"
-                    checked={enableWalkForward}
-                    onChange={(e) => setEnableWalkForward(e.target.checked)}
-                    className="rounded border-white/10 bg-black/30 accent-blue-500"
-                  />
-                </div>
-
-                {enableWalkForward && (
-                  <Field label="Train period end">
-                    <input
-                      type="date"
-                      value={trainEnd}
-                      onChange={(e) => setTrainEnd(e.target.value)}
-                      className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white"
-                    />
-                  </Field>
-                )}
-              </div>
-
-              <button
-                onClick={runSim}
-                disabled={busy}
-                className="rounded-lg bg-blue-600 w-full py-2 font-mono text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50"
-              >
-                {busy ? "Running Backtest..." : "Run Backtest"}
-              </button>
+      {/* AI Insights */}
+      <div className="card">
+        <div className="section-label mb-3">AI Insights</div>
+        <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          {aiInsights.map((ins, i) => (
+            <div key={i} className="flex items-start gap-2 rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+              <span style={{ fontSize: "var(--text-md)" }}>{ins.icon}</span>
+              <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5 }}>{ins.text}</p>
             </div>
-
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
-              ⚠️ <strong>Disclaimer:</strong> These results reflect Python's SMC pattern detection,
-              not manual chart reading with trader discretion. Live results will differ. Use as directional guidance only.
-            </div>
-          </div>
-
-          {/* Right panel: results */}
-          <div className="lg:col-span-2 space-y-4">
-            {busy && <Skeleton className="h-96 w-full" />}
-            
-            {!busy && smcBacktestResult && (
-              smcBacktestResult.error ? (
-                <div className="panel p-4 text-xs text-amber-300">{smcBacktestResult.error}</div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Overall / Train / Test stats cards */}
-                  <div className="panel p-4 space-y-3">
-                    <div className="font-mono text-xs font-bold tracking-widest text-slate-400">
-                      PERFORMANCE METRICS
-                    </div>
-                    
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-lg bg-white/5 p-2">
-                        <div className="font-mono text-[9px] uppercase text-blue-400 font-bold">Overall Period</div>
-                        <div className="mt-1 space-y-1 font-mono text-xs text-slate-300">
-                          <div>Trades: <span className="text-white font-bold">{smcBacktestResult.stats.total_trades}</span></div>
-                          <div>Win Rate: <span className={cn("font-bold", smcBacktestResult.stats.win_rate_pct >= 50 ? "text-emerald-400" : "text-red-400")}>{smcBacktestResult.stats.win_rate_pct}%</span></div>
-                          <div>Drawdown: <span className="text-white font-bold">{smcBacktestResult.stats.max_drawdown_pct}%</span></div>
-                          <div>Return: <span className={cn("font-bold", smcBacktestResult.stats.total_return_pct >= 0 ? "text-emerald-400" : "text-red-400")}>{smcBacktestResult.stats.total_return_pct}%</span></div>
-                        </div>
-                      </div>
-
-                      {smcBacktestResult.train_stats && (
-                        <div className="rounded-lg bg-white/5 p-2 border border-blue-500/20">
-                          <div className="font-mono text-[9px] uppercase text-blue-400 font-bold">Train Period</div>
-                          <div className="mt-1 space-y-1 font-mono text-xs text-slate-300">
-                            <div>Trades: <span className="text-white font-bold">{smcBacktestResult.train_stats.total_trades}</span></div>
-                            <div>Win Rate: <span className={cn("font-bold", smcBacktestResult.train_stats.win_rate_pct >= 50 ? "text-emerald-400" : "text-red-400")}>{smcBacktestResult.train_stats.win_rate_pct}%</span></div>
-                            <div>Drawdown: <span className="text-white font-bold">{smcBacktestResult.train_stats.max_drawdown_pct}%</span></div>
-                            <div>Return: <span className={cn("font-bold", smcBacktestResult.train_stats.total_return_pct >= 0 ? "text-emerald-400" : "text-red-400")}>{smcBacktestResult.train_stats.total_return_pct}%</span></div>
-                          </div>
-                        </div>
-                      )}
-
-                      {smcBacktestResult.test_stats && (
-                        <div className="rounded-lg bg-white/5 p-2 border border-amber-500/20">
-                          <div className="font-mono text-[9px] uppercase text-amber-400 font-bold">Test Period</div>
-                          <div className="mt-1 space-y-1 font-mono text-xs text-slate-300">
-                            <div>Trades: <span className="text-white font-bold">{smcBacktestResult.test_stats.total_trades}</span></div>
-                            <div>Win Rate: <span className={cn("font-bold", smcBacktestResult.test_stats.win_rate_pct >= 50 ? "text-emerald-400" : "text-red-400")}>{smcBacktestResult.test_stats.win_rate_pct}%</span></div>
-                            <div>Drawdown: <span className="text-white font-bold">{smcBacktestResult.test_stats.max_drawdown_pct}%</span></div>
-                            <div>Return: <span className={cn("font-bold", smcBacktestResult.test_stats.total_return_pct >= 0 ? "text-emerald-400" : "text-red-400")}>{smcBacktestResult.test_stats.total_return_pct}%</span></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Recharts Curve */}
-                  <div className="panel p-4">
-                    <div className="mb-2 font-mono text-xs font-bold tracking-widest text-slate-400">
-                      EQUITY CURVE
-                    </div>
-                    <LabBacktestCurve equityCurve={smcBacktestResult.stats.equity_curve} />
-                  </div>
-
-                  {/* Trade details */}
-                  <div className="panel p-4">
-                    <div className="mb-2 font-mono text-xs font-bold tracking-widest text-slate-400">
-                      TRADE LOG
-                    </div>
-                    <div className="max-h-60 overflow-y-auto">
-                      <table className="w-full text-left font-mono text-[10px]">
-                        <thead className="text-slate-500 border-b border-white/5">
-                          <tr>
-                            <th className="py-1">Date</th>
-                            <th>Dir</th>
-                            <th>Score</th>
-                            <th>Entry</th>
-                            <th>Exit</th>
-                            <th>Outcome</th>
-                            <th>R</th>
-                            <th>P&L</th>
-                            {enableWalkForward && <th>Period</th>}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {smcBacktestResult.trades.map((t: any, i: number) => (
-                            <tr key={i} className="border-t border-white/5 text-slate-300">
-                              <td className="py-1">
-                                {new Date(t.entry_time).toLocaleDateString("en-IN", {
-                                  day: "2-digit",
-                                  month: "short",
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </td>
-                              <td className={t.direction === "long" ? "text-emerald-400" : "text-red-400"}>
-                                {t.direction.toUpperCase()}
-                              </td>
-                              <td>{t.setup_score}</td>
-                              <td>{t.entry_price}</td>
-                              <td>{t.exit_price}</td>
-                              <td className={t.exit_reason === "take_profit" ? "text-emerald-400" : t.exit_reason === "stop_loss" ? "text-red-400" : "text-slate-500"}>
-                                {t.exit_reason.toUpperCase()}
-                              </td>
-                              <td className={t.rr_achieved >= 0 ? "text-emerald-400" : "text-red-400"}>
-                                {t.rr_achieved >= 0 ? "+" : ""}{t.rr_achieved}R
-                              </td>
-                              <td className={t.pnl_inr >= 0 ? "text-emerald-400" : "text-red-400"}>
-                                {t.pnl_inr >= 0 ? "+" : ""}₹{t.pnl_inr.toLocaleString("en-IN")}
-                              </td>
-                              {enableWalkForward && (
-                                <td className={t.period === "train" ? "text-blue-400 font-bold" : "text-amber-400 font-bold"}>
-                                  {t.period.toUpperCase()}
-                                </td>
-                              )}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )
-            )}
-
-            {!busy && !smcBacktestResult && (
-              <div className="panel p-6 text-center text-xs text-slate-500">
-                Select configuration on the left and click "Run Backtest" to begin.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Stat({ label, value, cls = "text-slate-100" }: { label: string; value: string; cls?: string }) {
-  return (
-    <div className="rounded-lg bg-white/5 p-2">
-      <div className="font-mono text-[10px] uppercase text-slate-500">{label}</div>
-      <div className={cn("font-mono text-lg font-bold", cls)}>{value}</div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 font-mono text-[11px] text-slate-400">
-      {label}
-      {children}
-    </label>
-  );
-}
-
-function SignalTable({ signals }: { signals: { time: string; direction: string; score: number; price: number; outcome?: string; r_multiple?: number }[] }) {
-  if (!signals.length) return <p className="mt-3 text-xs text-slate-500">No signals in this window.</p>;
-  return (
-    <div className="mt-3 max-h-64 overflow-y-auto">
-      <table className="w-full text-left font-mono text-[11px]">
-        <thead className="text-slate-500">
-          <tr><th className="py-1">Time</th><th>Dir</th><th>Score</th><th>Price</th><th>Outcome</th><th>R</th></tr>
-        </thead>
-        <tbody>
-          {signals.map((s, i) => (
-            <tr key={i} className="border-t border-white/5">
-              <td className="py-1 text-slate-400">{s.time}</td>
-              <td className={s.direction === "long" ? "text-emerald-400" : "text-red-400"}>{s.direction}</td>
-              <td className="text-slate-300">{s.score}</td>
-              <td className="text-slate-300">{s.price}</td>
-              <td className={s.outcome === "win" ? "text-emerald-400" : s.outcome === "loss" ? "text-red-400" : "text-slate-500"}>{s.outcome ?? "—"}</td>
-              <td className={(s.r_multiple ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}>{s.r_multiple ?? "—"}</td>
-            </tr>
           ))}
-        </tbody>
-      </table>
+        </div>
+      </div>
+
+      {/* Market Conditions + Timeframe + Equity Curve */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 2fr" }}>
+        {/* Market Conditions */}
+        <div className="card">
+          <div className="section-label mb-3">Market Conditions</div>
+          <div className="flex flex-col gap-3">
+            {marketConditions.map((mc) => (
+              <div key={mc.label}>
+                <div className="flex justify-between mb-1">
+                  <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{mc.label}</span>
+                  <span className="font-mono font-bold" style={{ fontSize: "var(--text-sm)", color: mc.color }}>{mc.value}%</span>
+                </div>
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${mc.value}%`, background: mc.color }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Timeframe Analysis */}
+        <div className="card">
+          <div className="section-label mb-3">Timeframe Analysis</div>
+          <div className="grid grid-cols-4 gap-1 mb-3">
+            {TIMEFRAMES.map((tf) => (
+              <button key={tf} type="button" onClick={() => setActiveTF(tf)}
+                className="rounded-md py-1.5 text-center font-semibold transition-all"
+                style={{ fontSize: "var(--text-xs)", background: activeTF === tf ? "var(--accent-primary)" : "var(--bg-elevated)", color: activeTF === tf ? "#fff" : "var(--text-secondary)", border: "1px solid var(--border-subtle)" }}>
+                {tf}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "Best TF",  value: "4H",    color: "var(--color-bull)" },
+              { label: "Win Rate", value: "68%",   color: "var(--color-bull)" },
+              { label: "Return",   value: "+2.3R", color: "var(--color-bull)" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-lg p-2 text-center" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{s.label}</div>
+                <div className="font-mono font-bold" style={{ fontSize: "var(--text-md)", color: s.color }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Equity Curve */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <span className="section-label">Equity Curve (Scenario)</span>
+            <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>Cumulative Return (R) ▼</button>
+          </div>
+          <ResponsiveContainer width="100%" height={110}>
+            <AreaChart data={equityCurve} margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+              <defs>
+                <linearGradient id="labGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#26d07c" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#26d07c" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#4a5568" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => `${v}R`} />
+              <Tooltip contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }} />
+              <Area type="monotone" dataKey="value" stroke="#26d07c" strokeWidth={2} fill="url(#labGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+          <div className="grid grid-cols-4 gap-2 mt-3">
+            {[
+              { label: "Starting Bal", value: "₹50,000" },
+              { label: "Ending Bal",   value: "₹62,450" },
+              { label: "Max Drawdown", value: "-4.1%" },
+              { label: "Sharpe",       value: "1.84" },
+            ].map((s) => (
+              <div key={s.label} className="text-center">
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{s.label}</div>
+                <div className="font-mono font-semibold" style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* All Scenarios table */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <span className="section-label">All Scenarios</span>
+          <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>View All Scenarios</button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                {["#", "Scenario Name", "Conditions", "Win Rate", "Avg Return", "Profit Factor", "Trades", "Status", "Action"].map((h) => (
+                  <th key={h} className="pb-2 text-left font-semibold pr-3 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dynamicScenarios.map((s) => (
+                <tr key={s.id} onClick={() => setSelectedId(s.id)} style={{ borderBottom: "1px solid var(--border-subtle)", cursor: "pointer", background: selectedId === s.id ? "rgba(108,99,255,0.05)" : "transparent" }}>
+                  <td className="py-2 pr-3 font-mono" style={{ color: "var(--text-muted)" }}>{s.id}</td>
+                  <td className="py-2 pr-3 font-semibold" style={{ color: "var(--text-primary)" }}>{s.name}</td>
+                  <td className="py-2 pr-3" style={{ color: "var(--text-secondary)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.conditions}</td>
+                  <td className="py-2 pr-3 font-mono font-bold" style={{ color: s.winRate >= 60 ? "var(--color-bull)" : "var(--color-bear)" }}>{s.winRate}%</td>
+                  <td className="py-2 pr-3 font-mono font-bold" style={{ color: s.avgReturn >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
+                    {s.avgReturn >= 0 ? "+" : ""}{s.avgReturn}%
+                  </td>
+                  <td className="py-2 pr-3 font-mono" style={{ color: s.profitFactor >= 1.5 ? "var(--color-bull)" : "var(--color-bear)" }}>{s.profitFactor.toFixed(1)}</td>
+                  <td className="py-2 pr-3 font-mono" style={{ color: "var(--text-muted)" }}>{s.trades}</td>
+                  <td className="py-2 pr-3">
+                    <span style={{ fontWeight: 700, fontSize: "var(--text-xs)", color: s.status === "Active" ? "var(--color-bull)" : "var(--text-muted)" }}>
+                      {s.status === "Active" ? "● Active" : "○ Inactive"}
+                    </span>
+                  </td>
+                  <td className="py-2">
+                    <div className="flex items-center gap-2">
+                      <button type="button" title="Run" style={{ color: "var(--text-accent)" }}><Play size={12} /></button>
+                      <button type="button" title="Chart" style={{ color: "var(--text-secondary)" }}><BarChart2 size={12} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

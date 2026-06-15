@@ -39,7 +39,6 @@ class Settings(BaseSettings):
     max_open_positions: int = 3
     daily_loss_limit_pct: float = 5.0
     decision_interval_minutes: int = 15
-    boardroom_mode: str = "single_claude"
 
     @property
     def delta_base_url(self) -> str:

@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import select
 
 from backend.config import settings
 from backend.db.database import AsyncSessionLocal
@@ -159,5 +158,20 @@ class SafetyManager:
         except Exception:
             logger.exception("Failed to persist daily reset")
 
+    async def get_status(self) -> dict:
+        """Return a dictionary of the current system safety status."""
+        try:
+            positions = await delta_client.get_positions()
+            open_count = len(positions)
+        except Exception:
+            open_count = 0
+        return {
+            "execution_mode": self.execution_mode,
+            "kill_switch_active": self.kill_switch_active,
+            "daily_pnl_pct": self.daily_pnl_pct,
+            "open_positions": open_count,
+        }
+
 
 safety_manager = SafetyManager()
+

@@ -119,6 +119,15 @@ class DeltaClient:
         logger.exception("Delta request failed after {} attempts: {} {}", MAX_RETRIES, method, path)
         raise DeltaAPIError(0, f"Network failure after {MAX_RETRIES} retries: {last_error}")
 
+    def _to_delta_symbol(self, symbol: str) -> str:
+        INSTRUMENT_MAP = {
+            "BTCUSD_PERP": "BTCUSD",
+            "ETHUSD_PERP": "ETHUSD",
+            "BTC_USDT_PERP": "BTCUSD",
+            "ETH_USDT_PERP": "ETHUSD",
+        }
+        return INSTRUMENT_MAP.get(symbol, symbol)
+
     # ------------------------------------------------------------------
     # Market data (public)
     # ------------------------------------------------------------------
@@ -141,6 +150,7 @@ class DeltaClient:
 
         Optional `end` (epoch seconds) anchors the window for historical replay.
         """
+        symbol = self._to_delta_symbol(symbol)
         minutes = int(resolution)
         delta_res = self.RESOLUTION_MAP.get(minutes)
         if delta_res is None:
@@ -163,14 +173,36 @@ class DeltaClient:
         return sorted(candles, key=lambda c: c.get("time", 0))[-count:]
 
     async def get_product(self, symbol: str) -> dict:
+        symbol = self._to_delta_symbol(symbol)
         data = await self._request("GET", f"/v2/products/{symbol}")
         return data.get("result", data)
 
+    async def get_order_leverage(self, product_id: int) -> dict:
+        data = await self._request(
+            "GET",
+            f"/v2/products/{product_id}/orders/leverage",
+            auth=True,
+        )
+        return data.get("result", data)
+
+    async def set_order_leverage(self, product_id: int, leverage: int) -> dict:
+        payload = {"leverage": int(leverage)}
+        logger.info("Setting order leverage for product {} -> {}x", product_id, leverage)
+        data = await self._request(
+            "POST",
+            f"/v2/products/{product_id}/orders/leverage",
+            json_body=payload,
+            auth=True,
+        )
+        return data.get("result", data)
+
     async def get_ticker(self, symbol: str) -> dict:
+        symbol = self._to_delta_symbol(symbol)
         data = await self._request("GET", f"/v2/tickers/{symbol}")
         return data.get("result", data)
 
     async def get_orderbook(self, symbol: str, depth: int = 10) -> dict:
+        symbol = self._to_delta_symbol(symbol)
         data = await self._request("GET", f"/v2/l2orderbook/{symbol}", params={"depth": depth})
         return data.get("result", data)
 
@@ -198,6 +230,7 @@ class DeltaClient:
         stop_loss: float | None = None,
         take_profit: float | None = None,
     ) -> dict:
+        instrument = self._to_delta_symbol(instrument)
         payload: dict[str, Any] = {
             "product_symbol": instrument,
             "side": side,  # "buy" | "sell"
@@ -239,6 +272,7 @@ class DeltaClient:
 
     async def update_stop_loss(self, instrument: str, stop_loss_price: float) -> dict:
         """Move the bracket stop-loss for an open position (edit, fallback create)."""
+        instrument = self._to_delta_symbol(instrument)
         payload = {
             "product_symbol": instrument,
             "bracket_stop_loss_price": str(round(stop_loss_price, 1)),
@@ -252,6 +286,7 @@ class DeltaClient:
 
     async def close_position(self, instrument: str) -> dict:
         """Close an open position by placing an opposite reduce-only market order."""
+        instrument = self._to_delta_symbol(instrument)
         positions = await self.get_positions()
         position = next(
             (p for p in positions if p.get("product_symbol") == instrument),
@@ -287,4 +322,22 @@ class DeltaClient:
         data = await self._request(
             "GET", "/v2/orders/history", params=params, auth=True
         )
+        return data.get("result", [])
+
+    async def get_open_orders(self, instrument: str | None = None) -> list[dict]:
+        """Return list of open/pending orders, optionally filtered by instrument."""
+        params: dict[str, Any] = {"state": "open"}
+        if instrument:
+            params["product_symbol"] = self._to_delta_symbol(instrument)
+        data = await self._request("GET", "/v2/orders", params=params, auth=True)
+        return data.get("result", [])
+
+    async def get_options_chain(self, underlying: str = "BTC") -> list[dict]:
+        """Fetch all option contracts for a given underlying asset."""
+        params: dict[str, Any] = {
+            "contract_types": "put_options,call_options",
+            "underlying_asset_symbol": underlying,
+            "page_size": 500,
+        }
+        data = await self._request("GET", "/v2/products", params=params)
         return data.get("result", [])
