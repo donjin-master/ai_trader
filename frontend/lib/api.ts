@@ -49,6 +49,7 @@ export interface Status {
 }
 
 export interface RiskProfile {
+  active_instruments?: string[];
   total_capital: number;
   daily_budget_pct: number;
   weekly_budget_pct: number;
