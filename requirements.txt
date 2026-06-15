@@ -17,3 +17,4 @@ redis
 numpy
 pytz
 pgvector
+pandas
