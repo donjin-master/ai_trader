@@ -272,16 +272,16 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
             <div className="card">
               <div className="section-label mb-2">Boardroom Tally</div>
               <p style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)", marginBottom: 12 }}>
-                {selected.vote_tally || "N/A"}
+                {selected.decision_json?.vote_tally || "N/A"}
               </p>
-              {selected.boardroom && selected.boardroom.length > 0 && (
+              {selected.boardroom_votes?.votes && selected.boardroom_votes.votes.length > 0 && (
                 <div className="flex flex-col gap-2">
-                  {selected.boardroom.map((member: any, idx: number) => (
+                  {selected.boardroom_votes.votes.map((member, idx: number) => (
                     <div key={idx} className="rounded p-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
                       <div className="font-semibold" style={{ fontSize: "var(--text-xs)", color: "var(--accent-primary)" }}>{member.member}</div>
                       <div className="flex justify-between mt-1">
-                        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{member.action?.toUpperCase()}</span>
-                        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>Conf: {member.confidence}/10</span>
+                        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{member.vote?.toUpperCase()}</span>
+                        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>Conf: {member.conviction}/10</span>
                       </div>
                     </div>
                   ))}
