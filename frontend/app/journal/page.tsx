@@ -253,7 +253,7 @@ function FilterButton({
           borderRadius: 12,
           boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
           padding: "16px",
-          width: 300,
+          width: "min(300px, calc(100vw - 32px))",
         }}>
           <div className="flex items-center justify-between mb-4">
             <span className="font-semibold" style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>Filters</span>
@@ -877,7 +877,7 @@ export default function JournalPage() {
       </div>
 
       {/* Stats strip */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
         {[
           { label: "Total Trades", value: allTrades.length,                sub: `${closed.length} closed`,               subColor: "var(--text-muted)" },
           { label: "Win Rate",     value: `${winRate.toFixed(1)}%`,        sub: `${wins.length}W / ${closed.length - wins.length}L`, subColor: winRate >= 50 ? "var(--color-bull)" : "var(--color-bear)" },
@@ -894,7 +894,7 @@ export default function JournalPage() {
         ))}
       </div>
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: "3fr 2fr" }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4">
         <div className="flex flex-col gap-4">
           {/* Equity Curve */}
           <div className="card">
@@ -957,7 +957,8 @@ export default function JournalPage() {
                 {activeFiltersCount > 0 && <span style={{ color: "var(--accent-primary)" }}> (filtered)</span>}
               </span>
             </div>
-            <div className="overflow-x-auto">
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -1004,6 +1005,51 @@ export default function JournalPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile card list */}
+            <div className="md:hidden flex flex-col gap-2">
+              {filteredTrades.slice(0, 15).map((t) => {
+                const res = resultLabel(t);
+                const dur = t.duration_mins != null ? `${Math.floor(t.duration_mins / 60)}h ${t.duration_mins % 60}m` : "—";
+                const dir = (t.direction ?? t.action ?? "—").toUpperCase();
+                return (
+                  <Link
+                    key={t.id}
+                    href={`/journal/${t.id}`}
+                    className="rounded-lg p-3 flex flex-col gap-1.5"
+                    style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold" style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>{t.instrument ?? "—"}</span>
+                      <span className="font-mono font-bold" style={{ fontSize: "var(--text-sm)", color: (t.pnl_pct ?? 0) >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
+                        {t.pnl_pct != null ? `${t.pnl_pct >= 0 ? "+" : ""}${t.pnl_pct.toFixed(2)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold" style={{ fontSize: "var(--text-xs)", color: dir === "LONG" ? "var(--color-bull)" : dir === "SHORT" ? "var(--color-bear)" : "var(--text-muted)" }}>
+                        {dir}
+                      </span>
+                      <span className="font-bold" style={{ fontSize: "var(--text-xs)", color: resultColor(res) }}>{res}</span>
+                      <span className="font-mono ml-auto" style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+                        {t.created_at ? new Date(t.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                      <span>Confidence: {t.confidence ?? t.boardroom_confidence ?? "—"}/10</span>
+                      <span>{dur}</span>
+                    </div>
+                  </Link>
+                );
+              })}
+              {filteredTrades.length === 0 && (
+                <div className="py-8 text-center" style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
+                  No trades match the current filters.{" "}
+                  {activeFiltersCount > 0 && (
+                    <button type="button" onClick={resetFilters} style={{ color: "var(--accent-primary)" }}>Clear filters</button>
+                  )}
+                </div>
+              )}
             </div>
             {filteredTrades.length > 15 && (
               <button type="button" style={{ fontSize: "var(--text-xs)", color: "var(--accent-primary)", marginTop: 8 }}>
@@ -1174,7 +1220,7 @@ export default function JournalPage() {
         </div>
       </div>
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Latest Reflection */}
         <div className="card">
           <div className="section-label mb-3">Latest Reflection</div>
@@ -1215,6 +1261,7 @@ export default function JournalPage() {
         {/* Performance by Setup */}
         <div className="card">
           <div className="section-label mb-3">Performance by Setup</div>
+          <div className="overflow-x-auto">
           <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -1244,6 +1291,7 @@ export default function JournalPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
