@@ -313,3 +313,112 @@ async def simulate_strategy(config: dict, date_from: str, date_to: str) -> dict:
         "total_r": round(sum(o["r_multiple"] for o in outcomes), 1),
         "decisions": outcomes,
     }
+
+
+# ---------------------------------------------------------------------------
+# Mode 4 — Monte Carlo: bootstrap-resample real trade history
+# ---------------------------------------------------------------------------
+
+def _percentile(sorted_values: list[float], p: float) -> float:
+    idx = min(len(sorted_values) - 1, max(0, round(p / 100 * (len(sorted_values) - 1))))
+    return round(sorted_values[idx], 2)
+
+
+async def monte_carlo_simulation(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    simulations: int = 1000,
+    starting_capital: float | None = None,
+    ruin_threshold_pct: float = 50.0,
+) -> dict:
+    """Bootstrap-resample the user's real closed-trade P&L to estimate the
+    distribution of possible equity paths — drawdown distribution and
+    probability of ruin. Pure resampling, no LLM/network calls.
+    """
+    import random
+    import statistics
+
+    simulations = max(100, min(int(simulations), 5000))
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(UserTrade))
+        rows = result.scalars().all()
+
+    trades = [r for r in rows if r.exit_time is not None and r.pnl_inr is not None]
+    if date_from:
+        cutoff = pd.to_datetime(date_from, utc=True)
+        trades = [r for r in trades if r.exit_time >= cutoff]
+    if date_to:
+        cutoff = pd.to_datetime(date_to, utc=True)
+        trades = [r for r in trades if r.exit_time <= cutoff]
+    if not trades:
+        return {"error": "no imported trades — run /api/dna/import first"}
+
+    pnl_list = [float(r.pnl_inr) for r in trades]
+    n = len(pnl_list)
+
+    if starting_capital is None:
+        from backend.execution.risk_profile import risk_manager
+        profile = await risk_manager.get_profile()
+        starting_capital = float(profile["total_capital"])
+
+    ruin_level = starting_capital * (1 - ruin_threshold_pct / 100)
+
+    n_checkpoints = min(20, n)
+    checkpoint_indices = sorted({max(1, round((i + 1) * n / n_checkpoints)) for i in range(n_checkpoints)})
+
+    final_returns: list[float] = []
+    max_drawdowns: list[float] = []
+    ruin_count = 0
+    checkpoint_equities: dict[int, list[float]] = {idx: [] for idx in checkpoint_indices}
+
+    for _ in range(simulations):
+        sampled = random.choices(pnl_list, k=n)
+        equity = starting_capital
+        peak = starting_capital
+        max_dd = 0.0
+        hit_ruin = False
+        for i, pnl in enumerate(sampled, start=1):
+            equity += pnl
+            peak = max(peak, equity)
+            if peak > 0:
+                max_dd = max(max_dd, (peak - equity) / peak * 100)
+            if equity <= ruin_level:
+                hit_ruin = True
+            if i in checkpoint_equities:
+                checkpoint_equities[i].append(equity)
+        final_returns.append((equity - starting_capital) / starting_capital * 100)
+        max_drawdowns.append(max_dd)
+        if hit_ruin:
+            ruin_count += 1
+
+    def percentiles(values: list[float]) -> dict:
+        s = sorted(values)
+        return {
+            "p5": _percentile(s, 5), "p50": _percentile(s, 50), "p95": _percentile(s, 95),
+            "mean": round(statistics.mean(values), 2),
+        }
+
+    fan_chart = [
+        {
+            "checkpoint": idx,
+            **{f"p{p}": _percentile(sorted(checkpoint_equities[idx]), p) for p in (5, 50, 95)},
+        }
+        for idx in checkpoint_indices
+    ]
+
+    return {
+        "trades_used": n,
+        "simulations": simulations,
+        "starting_capital": starting_capital,
+        "ruin_threshold_pct": ruin_threshold_pct,
+        "probability_of_ruin": round(ruin_count / simulations, 4),
+        "final_return_pct": percentiles(final_returns),
+        "max_drawdown_pct": percentiles(max_drawdowns),
+        "fan_chart": fan_chart,
+        "disclaimer": (
+            "Bootstrap resampling of your real trade history — assumes past trade "
+            "outcomes are representative of future ones; does not account for "
+            "changing market regimes."
+        ),
+    }

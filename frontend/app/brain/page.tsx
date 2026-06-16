@@ -32,6 +32,21 @@ function fmtDate(iso: string | null | undefined) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
+// Confidence/score → visual progress bar (replaces hard-to-read ASCII block bars)
+function ConfidenceBar({ value, max = 10, color }: { value: number; max?: number; color: string }) {
+  const pct = Math.max(0, Math.min(100, (value / max) * 100));
+  return (
+    <div className="flex items-center gap-2" style={{ minWidth: 90 }}>
+      <div className="progress-track flex-1" style={{ height: 5 }}>
+        <div className="progress-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span className="font-mono font-semibold" style={{ fontSize: "var(--text-sm)", color }}>
+        {value}/{max}
+      </span>
+    </div>
+  );
+}
+
 function Sparkline({ positive = true }: { positive?: boolean }) {
   const pts = positive ? [2,5,4,8,6,10,9,12,11,15] : [15,11,12,9,10,6,8,4,5,2];
   const w = 80, h = 28, max = Math.max(...pts), min = Math.min(...pts), range = max - min || 1;
@@ -72,99 +87,94 @@ function DecisionCard({ d }: { d: Trade }) {
   const voteTally    = d.decision_json?.vote_tally;
   const votes        = d.boardroom_votes?.votes ?? [];
   const confidence   = d.confidence ?? d.boardroom_confidence;
-  const confBar      = confidence != null ? "█".repeat(confidence) + "░".repeat(10 - confidence) : null;
+  const isMathDecision = (d.reasoning ?? "").includes("Boardroom LLM bypassed");
 
   return (
-    <div className="rounded-xl overflow-hidden"
-      style={{ border: `1px solid ${accentColor}28`, background: "var(--bg-card)" }}>
+    <div className="rounded-xl overflow-hidden transition-colors"
+      style={{ border: `1px solid ${accentColor}30`, background: "var(--bg-card)" }}>
 
       {/* Row 1 — main summary */}
-      <div className="flex items-start gap-3 px-4 py-3">
+      <div className="flex items-start gap-3.5 px-5 py-4">
         {/* verdict icon */}
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg mt-0.5"
-          style={{ background: accentBg, border: `1px solid ${accentColor}30` }}>
-          <VIcon size={16} style={{ color: accentColor }} />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg mt-0.5"
+          style={{ background: accentBg, border: `1px solid ${accentColor}35` }}>
+          <VIcon size={18} style={{ color: accentColor }} />
         </div>
 
         <div className="flex-1 min-w-0">
           {/* top line */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold" style={{ fontSize: "var(--text-md)", color: accentColor }}>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="font-bold tracking-wide" style={{ fontSize: "var(--text-lg)", color: accentColor }}>
               {action.toUpperCase()}
             </span>
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)", fontWeight: 600 }}>
+            <span style={{ fontSize: "var(--text-base)", color: "var(--text-primary)", fontWeight: 600 }}>
               {d.instrument ?? "—"}
             </span>
             {isTraded && (
-              <span className="rounded-full px-2 py-0.5 font-bold"
-                style={{ fontSize: 9, background: "rgba(38,208,124,0.15)", border: "1px solid rgba(38,208,124,0.3)", color: "var(--color-bull)" }}>
-                TRADED
-              </span>
+              <span className="badge badge-high">Traded</span>
             )}
             {isSkipped && skipReason && (
-              <span className="rounded-full px-2 py-0.5 font-bold"
-                style={{ fontSize: 9, background: "rgba(255,163,7,0.12)", border: "1px solid rgba(255,163,7,0.3)", color: "#ffa307" }}>
-                SKIPPED
+              <span className="badge badge-medium">Skipped</span>
+            )}
+            {isMathDecision && (
+              <span className="badge" style={{ background: "rgba(77,166,255,0.15)", color: "var(--color-info)" }}>
+                Rule-Based
               </span>
             )}
           </div>
 
           {/* meta row */}
-          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-            <span className="flex items-center gap-1" style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-              <Clock size={10} />
+          <div className="flex items-center gap-4 mt-1.5 flex-wrap">
+            <span className="flex items-center gap-1.5" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+              <Clock size={12} />
               {fmtDate(d.created_at)} {fmtTime(d.created_at)} · {timeAgo(d.created_at)}
             </span>
-            {confidence != null && (
-              <span className="font-mono" style={{ fontSize: "var(--text-xs)", color: "var(--text-primary)" }}>
-                Conf {confidence}/10
-              </span>
-            )}
             {d.setup_score != null && (
-              <span className="font-mono" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-                Score {d.setup_score}{d.setup_grade ? ` (${d.setup_grade})` : ""}
+              <span className="font-mono" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                Setup score {d.setup_score}{d.setup_grade ? ` (${d.setup_grade})` : ""}
               </span>
             )}
             {voteTally && (
-              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                 Board: {voteTally}
               </span>
             )}
           </div>
 
           {/* confidence bar */}
-          {confBar && (
-            <div className="mt-1 font-mono" style={{ fontSize: 9, color: accentColor, letterSpacing: 1 }}>
-              [{confBar}]
+          {confidence != null && (
+            <div className="mt-2.5">
+              <ConfidenceBar value={confidence} color={accentColor} />
             </div>
           )}
 
           {/* reasoning preview */}
           {d.reasoning && (
-            <p className="mt-1.5" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-              {expanded ? d.reasoning : (d.reasoning.length > 160 ? d.reasoning.slice(0, 160) + "…" : d.reasoning)}
+            <p className="mt-3" style={{ fontSize: "var(--text-base)", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              {expanded ? d.reasoning : (d.reasoning.length > 180 ? d.reasoning.slice(0, 180) + "…" : d.reasoning)}
             </p>
           )}
 
           {/* skip reason */}
           {skipReason && (
-            <div className="mt-1.5 flex items-center gap-1.5">
-              <AlertTriangle size={11} style={{ color: "#ffa307" }} />
-              <span style={{ fontSize: "var(--text-xs)", color: "#ffa307" }}>{skipReason}</span>
+            <div className="mt-2.5 flex items-center gap-2 rounded-lg px-3 py-2"
+              style={{ background: "rgba(240,180,41,0.08)", border: "1px solid rgba(240,180,41,0.2)" }}>
+              <AlertTriangle size={13} style={{ color: "var(--color-neutral)", flexShrink: 0 }} />
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--color-neutral)" }}>{skipReason}</span>
             </div>
           )}
 
           {/* key signals */}
           {d.key_signals && d.key_signals.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
+            <div className="flex flex-wrap gap-2 mt-3">
               {d.key_signals.slice(0, expanded ? 20 : 4).map((s, i) => (
-                <span key={i} className="rounded-full px-2 py-0.5"
-                  style={{ fontSize: 9, background: "rgba(108,99,255,0.12)", border: "1px solid rgba(108,99,255,0.22)", color: "var(--accent-primary)" }}>
+                <span key={i} className="rounded-full px-2.5 py-1"
+                  style={{ fontSize: "var(--text-xs)", fontWeight: 500, background: "rgba(108,99,255,0.12)", border: "1px solid rgba(108,99,255,0.25)", color: "var(--accent-primary)" }}>
                   {s}
                 </span>
               ))}
               {!expanded && (d.key_signals.length > 4) && (
-                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>+{d.key_signals.length - 4} more</span>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", alignSelf: "center" }}>+{d.key_signals.length - 4} more</span>
               )}
             </div>
           )}
@@ -172,30 +182,30 @@ function DecisionCard({ d }: { d: Trade }) {
 
         {/* expand toggle */}
         <button type="button" onClick={() => setExpanded((v) => !v)}
-          className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg mt-0.5"
+          className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg mt-0.5 transition-colors"
           style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)" }}>
-          {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </button>
       </div>
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="px-4 pb-4 flex flex-col gap-3"
-          style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }}>
+        <div className="px-5 pb-5 flex flex-col gap-4"
+          style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16 }}>
 
           {/* Bull vs Bear */}
           {(d.bull_case || d.bear_case) && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               {d.bull_case && (
-                <div className="rounded-lg p-3" style={{ background: "rgba(38,208,124,0.06)", border: "1px solid rgba(38,208,124,0.18)" }}>
-                  <div className="font-bold mb-1" style={{ fontSize: 10, color: "var(--color-bull)" }}>▲ BULL CASE</div>
-                  <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5 }}>{d.bull_case}</p>
+                <div className="rounded-lg p-3.5" style={{ background: "rgba(38,208,124,0.06)", border: "1px solid rgba(38,208,124,0.2)" }}>
+                  <div className="font-bold mb-1.5" style={{ fontSize: "var(--text-xs)", letterSpacing: "0.06em", color: "var(--color-bull)" }}>▲ BULL CASE</div>
+                  <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: 1.6 }}>{d.bull_case}</p>
                 </div>
               )}
               {d.bear_case && (
-                <div className="rounded-lg p-3" style={{ background: "rgba(255,77,106,0.06)", border: "1px solid rgba(255,77,106,0.18)" }}>
-                  <div className="font-bold mb-1" style={{ fontSize: 10, color: "var(--color-bear)" }}>▼ BEAR CASE</div>
-                  <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5 }}>{d.bear_case}</p>
+                <div className="rounded-lg p-3.5" style={{ background: "rgba(255,77,106,0.06)", border: "1px solid rgba(255,77,106,0.2)" }}>
+                  <div className="font-bold mb-1.5" style={{ fontSize: "var(--text-xs)", letterSpacing: "0.06em", color: "var(--color-bear)" }}>▼ BEAR CASE</div>
+                  <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: 1.6 }}>{d.bear_case}</p>
                 </div>
               )}
             </div>
@@ -204,23 +214,23 @@ function DecisionCard({ d }: { d: Trade }) {
           {/* Boardroom votes */}
           {votes.length > 0 && (
             <div>
-              <div className="section-label mb-1.5">Boardroom Votes</div>
-              <div className="flex flex-col gap-1.5">
+              <div className="section-label mb-2">Boardroom Votes</div>
+              <div className="flex flex-col gap-2">
                 {votes.map((v, i) => (
-                  <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2"
+                  <div key={i} className="flex items-center gap-3 rounded-lg px-3.5 py-2.5"
                     style={{ background: "var(--bg-elevated)" }}>
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", minWidth: 80 }}>{v.member}</span>
+                    <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", minWidth: 84, fontWeight: 500 }}>{v.member}</span>
                     <span className="font-bold" style={{
-                      fontSize: "var(--text-xs)",
+                      fontSize: "var(--text-sm)",
                       color: v.vote === "long" ? "var(--color-bull)" : v.vote === "short" ? "var(--color-bear)" : "var(--text-muted)",
                     }}>
                       {(v.vote ?? "—").toUpperCase()}
                     </span>
-                    <span className="font-mono flex-1 text-right" style={{ fontSize: "var(--text-xs)", color: "var(--text-primary)" }}>
+                    <span className="font-mono flex-1 text-right" style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>
                       {v.conviction}/10
                     </span>
                     {v.primary_reason && (
-                      <span style={{ fontSize: 10, color: "var(--text-muted)", maxWidth: 200, textAlign: "right" }}>{v.primary_reason}</span>
+                      <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", maxWidth: 220, textAlign: "right" }}>{v.primary_reason}</span>
                     )}
                   </div>
                 ))}
@@ -231,8 +241,8 @@ function DecisionCard({ d }: { d: Trade }) {
           {/* Chair reasoning */}
           {d.decision_json?.chair_reasoning && (
             <div>
-              <div className="section-label mb-1">Chair Reasoning</div>
-              <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              <div className="section-label mb-1.5">Chair Reasoning</div>
+              <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: 1.65 }}>
                 {d.decision_json.chair_reasoning}
               </p>
             </div>
@@ -242,7 +252,7 @@ function DecisionCard({ d }: { d: Trade }) {
           {d.market_snapshot?.market_regime && (
             <div className="flex items-center gap-2">
               <span className="section-label">Regime:</span>
-              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-primary)", fontWeight: 600 }}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)", fontWeight: 600 }}>
                 {d.market_snapshot.market_regime}
               </span>
             </div>
@@ -250,17 +260,17 @@ function DecisionCard({ d }: { d: Trade }) {
 
           {/* Trade outcome if closed */}
           {d.status === "closed" && d.pnl_pct != null && (
-            <div className="rounded-lg px-3 py-2 flex items-center gap-3"
+            <div className="rounded-lg px-3.5 py-2.5 flex items-center gap-3"
               style={{
                 background: d.pnl_pct >= 0 ? "rgba(38,208,124,0.08)" : "rgba(255,77,106,0.08)",
                 border: `1px solid ${d.pnl_pct >= 0 ? "rgba(38,208,124,0.25)" : "rgba(255,77,106,0.25)"}`,
               }}>
-              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Outcome:</span>
-              <span className="font-mono font-bold" style={{ fontSize: "var(--text-sm)", color: d.pnl_pct >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Outcome:</span>
+              <span className="font-mono font-bold" style={{ fontSize: "var(--text-md)", color: d.pnl_pct >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
                 {d.pnl_pct >= 0 ? "+" : ""}{d.pnl_pct.toFixed(2)}%
               </span>
               {d.exit_trigger && (
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>via {d.exit_trigger.replace(/_/g, " ")}</span>
+                <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>via {d.exit_trigger.replace(/_/g, " ")}</span>
               )}
             </div>
           )}
@@ -275,11 +285,12 @@ function DecisionCard({ d }: { d: Trade }) {
 export default function BrainPage() {
   const [activeTab, setActiveTab] = useState("Decisions");
   const [decisionLimit, setDecisionLimit] = useState(20);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const { data: lessons,      mutate: refreshLessons  } = useSWR<Lesson[]      | null>("lessons",       () => api.lessons(),                POLL);
-  const { data: trades                                 } = useSWR<Trade[]       | null>("brain-trades",  () => api.trades(50),               POLL);
-  const { data: rawPatternStats                        } = useSWR<PatternStat[] | null>("patterns-stats",() => api.patternStats(),           POLL);
-  const { data: decisions,    mutate: refreshDecisions } = useSWR<Trade[]       | null>(
+  const { data: trades,       mutate: refreshTrades    } = useSWR<Trade[]       | null>("brain-trades",  () => api.trades(50),               POLL);
+  const { data: rawPatternStats, mutate: refreshPatterns } = useSWR<PatternStat[] | null>("patterns-stats",() => api.patternStats(),           POLL);
+  const { data: decisions,    mutate: refreshDecisions, isValidating: decisionsLoading } = useSWR<Trade[] | null>(
     ["decisions", decisionLimit],
     () => api.decisions(decisionLimit),
     POLL_DX,
@@ -334,8 +345,31 @@ export default function BrainPage() {
   const shortCount     = decisionFeed.filter((d) => (d.direction ?? d.action) === "short").length;
 
   async function handleRefresh() {
-    await Promise.all([refreshDecisions(), refreshLessons()]);
+    setIsRefreshing(true);
+    try {
+      await Promise.all([refreshDecisions(), refreshLessons(), refreshTrades(), refreshPatterns()]);
+    } finally {
+      setIsRefreshing(false);
+    }
   }
+
+  function handleExport() {
+    const exportRows = activeTab === "Learnings" ? sortedLessons
+      : activeTab === "Patterns" ? patternStats
+      : activeTab === "Rules" ? computedRules
+      : decisionFeed;
+    const blob = new Blob([JSON.stringify(exportRows, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ai-brain-${activeTab.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const refreshing = isRefreshing || decisionsLoading;
 
   return (
     <div className="flex flex-col gap-4" suppressHydrationWarning>
@@ -352,10 +386,15 @@ export default function BrainPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={handleRefresh} className="btn-ghost flex items-center gap-1.5">
-            <RefreshCw size={12} /> Refresh
+          <button type="button" onClick={handleRefresh} disabled={refreshing}
+            className="btn-ghost flex items-center gap-1.5"
+            style={{ opacity: refreshing ? 0.7 : 1, cursor: refreshing ? "default" : "pointer" }}>
+            <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+            {refreshing ? "Refreshing…" : "Refresh"}
           </button>
-          <button type="button" className="btn-ghost flex items-center gap-1.5"><Download size={12} /> Export</button>
+          <button type="button" onClick={handleExport} className="btn-ghost flex items-center gap-1.5">
+            <Download size={12} /> Export
+          </button>
         </div>
       </div>
 

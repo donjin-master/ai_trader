@@ -37,7 +37,8 @@ async def _safety_net_scan() -> None:
 
     from backend.execution.risk_profile import risk_manager
     profile = await risk_manager.get_profile()
-    instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]
+    instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]
+    instruments = [i for i in instruments if "XAUUSD" not in i]
     threshold_minutes = 25
 
     for instrument in instruments:
@@ -71,7 +72,7 @@ async def _safe_pending_orders() -> None:
 async def _safe_snapshot_storage() -> None:
     from backend.ai.loops import store_market_snapshot
     try:
-        for instrument in ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]:
+        for instrument in ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]:
             await store_market_snapshot(instrument)
     except Exception:
         logger.exception("Snapshot storage crashed")
@@ -89,7 +90,7 @@ async def _refresh_key_levels() -> None:
     from backend.perception.key_levels import key_levels_engine
     if _stream_processor is None:
         return
-    for instrument in ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]:
+    for instrument in ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]:
         try:
             levels = await key_levels_engine.compute(instrument, 0)
             _stream_processor.update_key_levels(instrument, levels)

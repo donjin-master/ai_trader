@@ -24,8 +24,8 @@ class SMCAnalyser:
     """Multi-timeframe SMC analysis engine."""
 
     TIMEFRAMES = {
-        "4h": {"resolution": "240", "candles": 100, "label": "4 Hour"},
-        "1h": {"resolution": "60", "candles": 100, "label": "1 Hour"},
+        "4h": {"resolution": "240", "candles": 300, "label": "4 Hour"},
+        "1h": {"resolution": "60", "candles": 300, "label": "1 Hour"},
         "15m": {"resolution": "15", "candles": 100, "label": "15 Minute"},
     }
 
@@ -267,7 +267,7 @@ class SMCAnalyser:
                         break
                 if not placed:
                     clusters.append({"price": level["price"], "strength": 1})
-            return [c for c in clusters if c["strength"] >= 2]
+            return clusters
 
         equal_highs = _cluster(swing_highs)
         equal_lows = _cluster(swing_lows)
@@ -313,6 +313,7 @@ class SMCAnalyser:
                     recent_sweep = {
                         "occurred": True, "type": "BUY_SIDE_SWEPT",
                         "price": round(c["price"], 2), "candles_ago": last_idx - i,
+                        "strength": c["strength"],
                     }
                     break
             if not recent_sweep["occurred"]:
@@ -321,6 +322,7 @@ class SMCAnalyser:
                         recent_sweep = {
                             "occurred": True, "type": "SELL_SIDE_SWEPT",
                             "price": round(c["price"], 2), "candles_ago": last_idx - i,
+                            "strength": c["strength"],
                         }
                         break
             if recent_sweep["occurred"]:
@@ -329,9 +331,11 @@ class SMCAnalyser:
         buy_side.sort(key=lambda x: x["distance_pct"])
         sell_side.sort(key=lambda x: x["distance_pct"])
         return {
-            "buy_side_liquidity": buy_side[:4],
-            "sell_side_liquidity": sell_side[:4],
+            "buy_side_liquidity": buy_side[:6],
+            "sell_side_liquidity": sell_side[:6],
             "recent_sweep": recent_sweep,
+            "equal_highs": equal_highs,
+            "equal_lows": equal_lows,
         }
 
     # ------------------------------------------------------------------
@@ -440,12 +444,20 @@ class SMCAnalyser:
         if len(trends) == 1 and "RANGING" not in trends:
             score += 2.0
             found.append("Multi-TF alignment (4H + 1H + 15M same direction)")
+        elif structure_4h["trend"] == structure_15m["trend"] and structure_4h["trend"] != "RANGING":
+            score += 1.0
+            found.append("Partial TF alignment (4H + 15M same direction)")
         else:
             missing.append("Multi-TF trend alignment")
 
-        if liquidity.get("recent_sweep", {}).get("occurred"):
-            score += 1.5
-            found.append(f"Liquidity sweep ({liquidity['recent_sweep']['type']})")
+        sweep = liquidity.get("recent_sweep", {})
+        if sweep.get("occurred"):
+            if sweep.get("strength", 1) >= 3:
+                score += 2.0
+                found.append(f"High-Prob Reversal: Liquidity sweep on Multi-Tap level ({sweep['type']})")
+            else:
+                score += 1.5
+                found.append(f"Liquidity sweep ({sweep['type']})")
         else:
             missing.append("Liquidity sweep")
 
@@ -486,8 +498,23 @@ class SMCAnalyser:
 
         bos = structure_15m.get("last_bos")
         if bos and bos["type"] == bias_dir and bias_dir != "RANGING":
-            score += 0.5
-            found.append("15M BOS in direction of 4H bias")
+            bos_price = bos.get("price", 0)
+            strength = 1
+            if bos["type"] == "BULLISH":
+                for c in liquidity.get("equal_highs", []):
+                    if bos_price and abs(c["price"] - bos_price) / bos_price <= 0.0015:
+                        strength = c["strength"]
+            else:
+                for c in liquidity.get("equal_lows", []):
+                    if bos_price and abs(c["price"] - bos_price) / bos_price <= 0.0015:
+                        strength = c["strength"]
+            
+            if bos.get("candles_ago", 999) <= 20 and strength == 1:
+                score += 1.5
+                found.append("High-Prob Breakout: 15M BOS through 1st-Tap level")
+            else:
+                score += 0.5
+                found.append("15M BOS in direction of 4H bias")
         else:
             missing.append("15M BOS aligned with 4H bias")
 
@@ -593,7 +620,7 @@ class SMCAnalyser:
         if hasattr(delta_client, "get"):
             candles = await delta_client.get("candles_4h")
         else:
-            candles = await delta_client.get_candles(instrument, "240", 100)
+            candles = await delta_client.get_candles(instrument, "240", 300)
         df = self._prepare_df(candles)
         structure = self.detect_market_structure(df)
         obs = self.detect_order_blocks(df, structure)
@@ -604,7 +631,7 @@ class SMCAnalyser:
         if hasattr(delta_client, "get"):
             candles = await delta_client.get("candles_1h")
         else:
-            candles = await delta_client.get_candles(instrument, "60", 100)
+            candles = await delta_client.get_candles(instrument, "60", 300)
         df = self._prepare_df(candles)
         structure = self.detect_market_structure(df)
         obs = self.detect_order_blocks(df, structure)
@@ -651,6 +678,7 @@ class SMCAnalyser:
         obs_15m = s15m["obs"]
         fvgs_15m = s15m["fvgs"]
 
+        liquidity_4h = self.detect_liquidity(df_4h)
         liquidity_1h = self.detect_liquidity(df_1h)
         liquidity_15m = self.detect_liquidity(df_15m)
 
@@ -671,6 +699,23 @@ class SMCAnalyser:
             pd_zone, inducement, pre_score,
             profile,
         )
+
+        htf_alerts = []
+        for liq in liquidity_4h.get("buy_side_liquidity", []):
+            if liq["distance_pct"] <= 0.5:
+                htf_alerts.append(f"Price is dangerously close (+{liq['distance_pct']}%) to 4H Buy-Side Liquidity at {liq['price']}. Watch for a sweep and reversal, or consider selling calls.")
+        for liq in liquidity_4h.get("sell_side_liquidity", []):
+            if liq["distance_pct"] <= 0.5:
+                htf_alerts.append(f"Price is dangerously close (-{liq['distance_pct']}%) to 4H Sell-Side Liquidity at {liq['price']}. Watch for a sweep and reversal, or consider selling puts.")
+
+        if htf_alerts:
+            context_text += "\n\n🚨 **HTF LIQUIDITY PROXIMITY ALERT** 🚨\n"
+            for alert in htf_alerts:
+                context_text += f"- {alert}\n"
+            
+            # Boost the pre-score to ensure the Boardroom evaluates this major HTF interaction
+            pre_score["score"] = min(10.0, pre_score["score"] + 2.5)
+            pre_score["confluences_found"].append("HTF Liquidity Proximity Alert (+2.5 bonus)")
 
         logger.info(
             "SMC analysis for {}: 4H={} 1H={} 15M={} | raw score {}/9",

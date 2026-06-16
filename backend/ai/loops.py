@@ -198,10 +198,26 @@ async def run_decision_loop(
         logger.exception("SMC analysis failed — falling back to basic snapshot")
         smc_analysis = None
 
+    # Strategy deploy gate: skip patterns the user hasn't enabled (empty list = no restriction)
+    pattern_type = smc_analyser.classify_pattern_type(smc_analysis) if smc_analysis else "general_smc"
+    enabled_patterns = profile.get("enabled_patterns") or []
+    if enabled_patterns and pattern_type not in enabled_patterns:
+        skip_reason = f"pattern '{pattern_type}' not enabled"
+        logger.info("Decision loop skipped for {}: {}", instrument, skip_reason)
+        await _store_decision(
+            status="logged_only",
+            instrument=instrument,
+            decision={"action": "skip", "reasoning": skip_reason, "confidence": 0, "boardroom": []},
+            snapshot=snapshot,
+            smc_analysis=smc_analysis,
+            trigger_event_type="scheduled_scan" if trigger_event is None else "event_driven",
+        )
+        return {"skipped": True, "reason": skip_reason}
+
     if smc_analysis:
         import os
         pre_score = smc_analysis.get("raw_score_pre_boardroom", {}).get("score", 0)
-        min_score = float(os.getenv("MIN_SMC_PRE_SCORE", "4.0"))
+        min_score = float(os.getenv("MIN_SMC_PRE_SCORE", "3.0"))
         if pre_score < min_score:
             _chop_counters[instrument] = _chop_counters.get(instrument, 0) + 1
             skip_reason = f"SMC pre-score too low ({pre_score} < {min_score})"
@@ -586,7 +602,7 @@ async def run_decision_loop(
         max_position_size_pct=profile["max_position_size_pct"],
         total_capital=profile["total_capital"],
         edge_factor=edge_factor,
-        pattern_type=smc_analyser.classify_pattern_type(smc_analysis) if smc_analysis else "general_smc",
+        pattern_type=pattern_type,
         session=key_levels.get("current_session", "us_london"),
         instrument=instrument,
     )
@@ -788,7 +804,7 @@ async def _populate_pattern_outcome(trade_id: str) -> None:
         await session.commit()
 
 
-INSTRUMENTS = ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]
+INSTRUMENTS = ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]
 
 PRE_SCAN_PROMPT = """
 You are a quick setup quality assessor.
@@ -834,7 +850,8 @@ async def run_multi_instrument_decision_loop() -> dict:
     open_count = len([p for p in portfolio if p.get("size", 0) != 0])
     profile = await risk_manager.get_profile()
     max_concurrent = profile.get("max_concurrent_trades", 3)
-    active_instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]
+    active_instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]
+    active_instruments = [i for i in active_instruments if "XAUUSD" not in i]
 
     pre_scans = list(await asyncio.gather(*(run_pre_scan(inst) for inst in active_instruments)))
     pre_scans.sort(key=lambda x: x["score"], reverse=True)

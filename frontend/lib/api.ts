@@ -51,6 +51,7 @@ export interface Status {
 
 export interface RiskProfile {
   active_instruments?: string[];
+  enabled_patterns: string[];
   total_capital: number;
   daily_budget_pct: number;
   weekly_budget_pct: number;
@@ -270,6 +271,7 @@ export interface Trade {
     max_loss_inr?: number;
     legs?: Array<{ type: string; strike: number; side: string; premium: number }>;
   } | null;
+  notes?: string | null;
 }
 
 export interface Lesson {
@@ -375,7 +377,9 @@ export interface PatternStat {
   total_trades: number;
   win_rate: number;
   avg_pnl_pct: number;
-  avg_confidence: number;
+  avg_confidence: number | null;
+  enabled: boolean;
+  untraded: boolean;
 }
 
 export const api = {
@@ -423,9 +427,34 @@ export const api = {
   resetRiskProfile: () => post<RiskProfile>("/api/risk-profile/reset"),
   updateLessonQuality: (id: string, qualityScore: number) =>
     put<{ status: string; quality_score: number }>(`/api/lessons/${id}/quality`, { quality_score: qualityScore }),
-  patternStats: () => get<any[]>("/api/patterns/stats"),
+  updateTradeNotes: (id: string, notes: string) =>
+    put<{ id: string; notes: string | null }>(`/api/trades/${id}/notes`, { notes }),
+  runReflection: (tradeId: string) =>
+    post<{ reflection?: unknown; error?: string }>(`/api/run-reflection/${tradeId}`),
+  closePosition: (instrument: string) =>
+    post<{ success?: boolean; error?: string }>(`/api/close/${instrument}`),
+  decisionChartBlobUrl: async (decisionId: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/decisions/${decisionId}/chart`, { headers: API_HEADERS });
+      if (!res.ok) return null;
+      return URL.createObjectURL(await res.blob());
+    } catch {
+      return null;
+    }
+  },
+  patternStats: () => get<PatternStat[]>("/api/patterns/stats"),
+  togglePattern: (patternType: string, enabled: boolean) =>
+    post<{ pattern_type: string; enabled: boolean; enabled_patterns: string[] }>(
+      `/api/patterns/${patternType}/toggle`, { enabled }
+    ),
   smcBacktest: (config: Record<string, unknown>) =>
-    post<any>("/api/backtest/smc", config),
+    post<SmcBacktestResult>("/api/backtest/smc", config),
+  labMonteCarlo: (dateFrom?: string, dateTo?: string, simulations = 1000, startingCapital?: number) =>
+    post<LabMonteCarlo>("/api/lab/monte-carlo", {
+      date_from: dateFrom, date_to: dateTo, simulations, starting_capital: startingCapital,
+    }),
+  labStressTest: (config: Record<string, unknown>) =>
+    post<LabStressTest>("/api/lab/stress-test", config),
 };
 
 // ── V1.2 types ──────────────────────────────────────────────────────────────
@@ -500,6 +529,78 @@ export interface LabSimulate {
   simulated_pnl_inr: number;
   total_r: number;
   decisions: LabSignal[];
+  error?: string;
+}
+
+export interface SmcBacktestTrade {
+  direction: string;
+  entry_price: number;
+  entry_time: string;
+  stop_loss: number;
+  take_profit: number;
+  exit_price: number;
+  exit_time: string;
+  exit_reason: string;
+  pnl_pct: number;
+  pnl_inr: number;
+  rr_achieved: number;
+  setup_score: number;
+  period: "train" | "test";
+}
+
+export interface SmcBacktestStats {
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate_pct: number;
+  avg_rr: number;
+  max_rr: number;
+  avg_pnl_pct: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  total_return_pct: number;
+  expectancy: number;
+  equity_curve: { date: string; equity: number; period?: string }[];
+}
+
+export interface SmcBacktestResult {
+  instrument: string;
+  timeframe: string;
+  date_from: string;
+  date_to: string;
+  train_end: string | null;
+  trades: SmcBacktestTrade[];
+  stats: SmcBacktestStats;
+  train_stats: SmcBacktestStats | null;
+  test_stats: SmcBacktestStats | null;
+  disclaimer?: string;
+  error?: string;
+}
+
+export interface LabMonteCarlo {
+  trades_used: number;
+  simulations: number;
+  starting_capital: number;
+  ruin_threshold_pct: number;
+  probability_of_ruin: number;
+  final_return_pct: { p5: number; p50: number; p95: number; mean: number };
+  max_drawdown_pct: { p5: number; p50: number; p95: number; mean: number };
+  fan_chart: { checkpoint: number; p5: number; p50: number; p95: number }[];
+  disclaimer?: string;
+  error?: string;
+}
+
+export interface LabStressTest {
+  instrument: string;
+  timeframe: string;
+  window: { from: string; to: string };
+  base: SmcBacktestStats;
+  scenarios: {
+    added_slippage: SmcBacktestStats;
+    win_rate_shock: SmcBacktestStats;
+    doubled_risk: SmcBacktestStats;
+  };
+  disclaimer?: string;
   error?: string;
 }
 

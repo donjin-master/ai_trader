@@ -63,6 +63,7 @@ _PROFILE_FIELDS = set(_NUMERIC_BOUNDS) | {
     "trail_method", "allow_position_assessment",
     "max_rr_cap", "vision_mode",
     "preferred_entry_mode", "options_enabled", "active_instruments",
+    "enabled_patterns",
 }
 
 
@@ -124,7 +125,8 @@ class RiskProfileManager:
             "scan_interval_london_mins": row.scan_interval_london_mins,
             "scan_interval_us_mins": row.scan_interval_us_mins,
             "scan_interval_overnight_mins": row.scan_interval_overnight_mins,
-            "active_instruments": row.active_instruments or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"],
+            "active_instruments": row.active_instruments or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"],
+            "enabled_patterns": row.enabled_patterns or [],
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
 
@@ -182,6 +184,9 @@ class RiskProfileManager:
             elif key == "active_instruments":
                 if not isinstance(value, list):
                     raise ValueError("active_instruments must be a list of strings")
+            elif key == "enabled_patterns":
+                if not isinstance(value, list):
+                    raise ValueError("enabled_patterns must be a list of strings")
             clean[key] = value
 
         async with AsyncSessionLocal() as session:

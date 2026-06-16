@@ -1,92 +1,287 @@
 "use client";
 
 import { useState } from "react";
+import useSWR from "swr";
 import {
   ScatterChart, Scatter, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
-  AreaChart, Area, PieChart, Pie, Cell,
+  LineChart, Line, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { FlaskConical, Plus, Download, Play, BarChart2 } from "lucide-react";
-
-import useSWR from "swr";
-import { api, type PatternStat } from "@/lib/api";
+import { FlaskConical, Download, Play, Loader2 } from "lucide-react";
+import {
+  api, type PatternStat, type RiskProfile, type LabBacktest, type LabReplay, type LabSimulate,
+  type SmcBacktestResult, type LabMonteCarlo, type LabStressTest, type SmcBacktestStats,
+} from "@/lib/api";
 
 const POLL = { refreshInterval: 60_000 };
+const TABS = ["Scenarios", "Backtests", "Monte Carlo", "Stress Tests", "Market Simulator"] as const;
+type Tab = (typeof TABS)[number];
 
-const TIMEFRAMES = ["15m", "1H", "4H", "1D"];
+const INSTRUMENTS = ["BTCUSD", "ETHUSD", "SOLUSD"];
+const LAB_TIMEFRAMES = ["15m", "1h", "4h", "1D"];
+const PREBUILT_RULES: Record<string, string> = {
+  no_morning: "No trades before 11:30am IST",
+  max_2_per_day: "Maximum 2 trades per day",
+  no_mondays: "No Monday trades",
+  no_weekend: "No weekend trades",
+  longs_only: "Long trades only",
+  shorts_only: "Short trades only",
+  cooldown_2h: "2-hour cool-down after a loss",
+};
 
-const outcomeColors = ["var(--color-bull)", "var(--color-bear)", "var(--color-purple)"];
-
-const marketConditions = [
-  { label: "Trending",       value: 65, color: "var(--color-bull)" },
-  { label: "Ranging",        value: 20, color: "var(--color-neutral)" },
-  { label: "Volatile",       value: 10, color: "var(--color-bear)" },
-  { label: "Low Volatility", value: 5,  color: "var(--color-purple)" },
-];
-
-const aiInsights = [
-  { icon: "✅", text: "Bull Breakout maintains 73% win rate across all market conditions — your most reliable setup." },
-  { icon: "⚠️", text: "Mean Reversion and News Fade are statistically negative expectancy. Consider removing from active rotation." },
-  { icon: "💡", text: "4H timeframe shows highest profit factor (2.1) vs 15m (1.4). Bias toward higher timeframe setups." },
-  { icon: "🔴", text: "Volatility Breakout has highest variance (σ=3.1R). Reduce position size by 50% on this strategy." },
-];
-
-function dotColor(s: any) {
-  if (s.profitFactor >= 2.0) return "var(--color-bull)";
-  if (s.profitFactor >= 1.5) return "var(--color-neutral)";
-  return "var(--color-bear)";
+function pct(n: number | null | undefined, decimals = 2): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  return `${n >= 0 ? "+" : ""}${n.toFixed(decimals)}%`;
+}
+function inr(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  return `${n >= 0 ? "+" : ""}₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
-const TABS = ["Scenarios", "Backtests", "Monte Carlo", "Stress Tests", "Market Simulator"];
+function NumberInput({ value, onChange, suffix, min, max, step }: {
+  value: number; onChange: (v: number) => void; suffix?: string; min?: number; max?: number; step?: number;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="number" value={value} min={min} max={max} step={step ?? 0.1}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        style={{
+          background: "var(--bg-input)", border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)", color: "var(--text-primary)",
+          fontSize: "var(--text-xs)", padding: "5px 8px", outline: "none", width: 76, textAlign: "right",
+        }}
+      />
+      {suffix && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{suffix}</span>}
+    </div>
+  );
+}
 
-const equityCurve = [
-  { date: "Jan", value: 0 }, { date: "Feb", value: 1.4 }, { date: "Mar", value: 0.8 },
-  { date: "Apr", value: 3.2 }, { date: "May", value: 2.6 }, { date: "Jun", value: 4.9 },
-];
+function DateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <input
+      type="date" value={value} onChange={(e) => onChange(e.target.value)}
+      style={{
+        background: "var(--bg-input)", border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-md)", color: "var(--text-primary)",
+        fontSize: "var(--text-xs)", padding: "5px 8px", outline: "none",
+      }}
+    />
+  );
+}
+
+function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      style={{
+        background: "var(--bg-input)", border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-md)", color: "var(--text-primary)",
+        fontSize: "var(--text-xs)", padding: "5px 8px", outline: "none",
+      }}>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>{children}</label>;
+}
+
+function RunButton({ onClick, loading, label = "Run" }: { onClick: () => void; loading: boolean; label?: string }) {
+  return (
+    <button type="button" disabled={loading} onClick={onClick}
+      className="btn-primary flex items-center gap-1.5" style={{ fontSize: "var(--text-xs)", padding: "6px 14px" }}>
+      {loading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} {loading ? "Running…" : label}
+    </button>
+  );
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg p-3" style={{ background: "rgba(255,77,106,0.08)", border: "1px solid rgba(255,77,106,0.25)" }}>
+      <p style={{ fontSize: "var(--text-xs)", color: "var(--color-bear)" }}>{message}</p>
+    </div>
+  );
+}
+
+function StatGrid({ items }: { items: { label: string; value: string; color?: string }[] }) {
+  return (
+    <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))" }}>
+      {items.map((s) => (
+        <div key={s.label} className="rounded-lg p-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{s.label}</div>
+          <div className="font-mono font-bold" style={{ fontSize: "var(--text-md)", color: s.color ?? "var(--text-primary)" }}>{s.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function statsRow(stats: SmcBacktestStats) {
+  return [
+    { label: "Win Rate", value: `${stats.win_rate_pct.toFixed(1)}%`, color: stats.win_rate_pct >= 50 ? "var(--color-bull)" : "var(--color-bear)" },
+    { label: "Avg RR", value: `${stats.avg_rr.toFixed(2)}R` },
+    { label: "Max Drawdown", value: `-${stats.max_drawdown_pct.toFixed(1)}%`, color: "var(--color-bear)" },
+    { label: "Total Return", value: pct(stats.total_return_pct), color: stats.total_return_pct >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+    { label: "Sharpe", value: stats.sharpe_ratio.toFixed(2) },
+    { label: "Expectancy", value: `${stats.expectancy >= 0 ? "+" : ""}${stats.expectancy.toFixed(2)}R`, color: stats.expectancy >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+    { label: "Trades", value: String(stats.total_trades) },
+  ];
+}
 
 export default function LabPage() {
-  const [activeTab, setActiveTab] = useState("Scenarios");
-  const [selectedId, setSelectedId] = useState(1);
-  const [activeTF, setActiveTF] = useState("4H");
+  const [activeTab, setActiveTab] = useState<Tab>("Scenarios");
+  const [selectedPattern, setSelectedPattern] = useState<string | null>(null);
 
   const { data: rawPatternStats } = useSWR<PatternStat[] | null>("patterns-stats-lab", () => api.patternStats(), POLL);
-  const patternStats = rawPatternStats ?? [];
-  const dynamicScenarios = patternStats.length > 0 ? patternStats.map((p, i) => ({
-    id: i + 1,
-    name: p.pattern_type,
-    conditions: "Dynamic AI pattern",
-    winRate: Math.round(p.win_rate),
-    avgReturn: parseFloat(p.avg_pnl_pct.toFixed(1)),
-    profitFactor: p.avg_pnl_pct > 0 ? 1.8 : 0.8,
-    trades: p.total_trades,
-    expectancy: p.avg_pnl_pct,
-    maxDrawdown: 3.5,
-    bestTrade: parseFloat((p.avg_pnl_pct + 1.2).toFixed(1)),
-    worstTrade: parseFloat((p.avg_pnl_pct - 1.2).toFixed(1)),
-    status: p.win_rate >= 50 ? "Active" : "Inactive",
-    desc: `Automatically tracked setup based on ${p.total_trades} trades.`
-  })) : [
-    { id: 1, name: "Bull Breakout",         conditions: "SMC break of structure + EMA alignment", winRate: 73, avgReturn: 2.8,  profitFactor: 2.1, trades: 22, expectancy: 2.41, maxDrawdown: 3.2, bestTrade: 4.2,  worstTrade: -1.1, status: "Active",   desc: "Trades long breakouts after SMC BOS with EMA trend alignment." },
-    { id: 2, name: "Liquidity Sweep Rev",   conditions: "Sweep below key low + reversal confirmation", winRate: 67, avgReturn: 2.1,  profitFactor: 1.9, trades: 18, expectancy: 1.89, maxDrawdown: 2.8, bestTrade: 3.8,  worstTrade: -1.4, status: "Active",   desc: "Fades liquidity sweeps below major swing lows with reversal signal." },
-    { id: 3, name: "London Open Fade",      conditions: "London spike + reversion within 30min",    winRate: 60, avgReturn: 1.5,  profitFactor: 1.6, trades: 15, expectancy: 1.52, maxDrawdown: 4.1, bestTrade: 2.6,  worstTrade: -2.1, status: "Active",   desc: "Fades the initial London open spike expecting mean reversion." },
-    { id: 4, name: "Mean Reversion",        conditions: "Oversold + strong support zone",            winRate: 42, avgReturn: -0.5, profitFactor: 0.9, trades: 12, expectancy: -0.54, maxDrawdown: 6.4, bestTrade: 1.8,  worstTrade: -3.2, status: "Inactive", desc: "Mean reversion into strong support areas. Currently underperforming." },
-    { id: 5, name: "Trend Continuation",   conditions: "4H EMA bounce + 15m confirmation",          winRate: 65, avgReturn: 1.9,  profitFactor: 1.75, trades: 28, expectancy: 1.68, maxDrawdown: 3.5, bestTrade: 3.1,  worstTrade: -1.5, status: "Active",   desc: "Enters trend continuation trades on 4H EMA pullbacks." },
-  ];
+  const patternStats = (rawPatternStats ?? []).filter((p) => !p.untraded);
+  const { data: riskProfile } = useSWR<RiskProfile | null>("risk-profile-lab", () => api.riskProfile(), POLL);
 
-  const selected = dynamicScenarios.find((s) => s.id === selectedId) ?? dynamicScenarios[0];
+  const selected = patternStats.find((p) => p.pattern_type === selectedPattern) ?? patternStats[0];
 
-  const totalScenarios = dynamicScenarios.length;
-  const activeScenarios = dynamicScenarios.filter((s) => s.status === "Active");
-  const avgWinRate = activeScenarios.length ? Math.round(activeScenarios.reduce((s, sc) => s + sc.winRate, 0) / activeScenarios.length) : 0;
-  const avgReturn = activeScenarios.length ? (activeScenarios.reduce((s, sc) => s + sc.avgReturn, 0) / activeScenarios.length).toFixed(1) : "0.0";
-  const bestScenario = dynamicScenarios.reduce((a, b) => a.avgReturn > b.avgReturn ? a : b);
-  const worstScenario = dynamicScenarios.reduce((a, b) => a.avgReturn < b.avgReturn ? a : b);
-  const avgPF = activeScenarios.length ? (activeScenarios.reduce((s, sc) => s + sc.profitFactor, 0) / activeScenarios.length).toFixed(1) : "0.0";
+  // ---- Backtests tab state ----
+  const [ruleKey, setRuleKey] = useState("no_morning");
+  const [customRule, setCustomRule] = useState("");
+  const [ruleDateFrom, setRuleDateFrom] = useState("");
+  const [ruleDateTo, setRuleDateTo] = useState("");
+  const [ruleResult, setRuleResult] = useState<LabBacktest | null>(null);
+  const [ruleLoading, setRuleLoading] = useState(false);
+  const [ruleError, setRuleError] = useState<string | null>(null);
 
-  const outcomeDist = [
-    { name: "Win",        value: Math.round(selected.winRate * selected.trades / 100), color: "var(--color-bull)" },
-    { name: "Loss",       value: Math.round((100 - selected.winRate) * selected.trades / 100), color: "var(--color-bear)" },
-    { name: "Break-even", value: Math.round(selected.trades * 0.05), color: "var(--color-purple)" },
-  ];
+  const runRuleBacktest = async () => {
+    setRuleLoading(true); setRuleError(null);
+    const rule = ruleKey === "custom" ? customRule.trim() : ruleKey;
+    if (!rule) { setRuleError("Enter a custom rule first."); setRuleLoading(false); return; }
+    const res = await api.labBacktest(rule, ruleDateFrom || undefined, ruleDateTo || undefined);
+    if (!res) setRuleError("Request failed.");
+    else if (res.error) setRuleError(res.error);
+    else setRuleResult(res);
+    setRuleLoading(false);
+  };
+
+  const [smcInstrument, setSmcInstrument] = useState("BTCUSD");
+  const [smcTimeframe, setSmcTimeframe] = useState("15m");
+  const [smcDateFrom, setSmcDateFrom] = useState("");
+  const [smcDateTo, setSmcDateTo] = useState("");
+  const [smcTrainEnd, setSmcTrainEnd] = useState("");
+  const [smcMinScore, setSmcMinScore] = useState(7.0);
+  const [smcMinRr, setSmcMinRr] = useState(3.0);
+  const [smcRiskPct, setSmcRiskPct] = useState(1.0);
+  const [smcCapital, setSmcCapital] = useState(50000);
+  const [smcResult, setSmcResult] = useState<SmcBacktestResult | null>(null);
+  const [smcLoading, setSmcLoading] = useState(false);
+  const [smcError, setSmcError] = useState<string | null>(null);
+
+  const runSmcBacktest = async () => {
+    if (!smcDateFrom || !smcDateTo) { setSmcError("Pick a date range first."); return; }
+    setSmcLoading(true); setSmcError(null);
+    const res = await api.smcBacktest({
+      instrument: smcInstrument, timeframe: smcTimeframe, date_from: smcDateFrom, date_to: smcDateTo,
+      min_setup_score: smcMinScore, min_rr: smcMinRr, risk_per_trade_pct: smcRiskPct,
+      starting_capital: smcCapital, train_end: smcTrainEnd || undefined,
+    });
+    if (!res) setSmcError("Request failed.");
+    else if (res.error) setSmcError(res.error);
+    else setSmcResult(res);
+    setSmcLoading(false);
+  };
+
+  // ---- Market Simulator tab state ----
+  const [repInstrument, setRepInstrument] = useState("BTCUSD");
+  const [repDateFrom, setRepDateFrom] = useState("");
+  const [repDateTo, setRepDateTo] = useState("");
+  const [repMinScore, setRepMinScore] = useState(7.0);
+  const [repResult, setRepResult] = useState<LabReplay | null>(null);
+  const [repLoading, setRepLoading] = useState(false);
+  const [repError, setRepError] = useState<string | null>(null);
+
+  const runReplay = async () => {
+    if (!repDateFrom || !repDateTo) { setRepError("Pick a date range first."); return; }
+    setRepLoading(true); setRepError(null);
+    const res = await api.labReplay(repInstrument, repDateFrom, repDateTo, repMinScore);
+    if (!res) setRepError("Request failed.");
+    else if (res.error) setRepError(res.error);
+    else setRepResult(res);
+    setRepLoading(false);
+  };
+
+  const [simInterval, setSimInterval] = useState(60);
+  const [simRr, setSimRr] = useState(riskProfile?.min_rr_ratio ?? 3.0);
+  const [simSlPct, setSimSlPct] = useState(0.5);
+  const [simRiskPct, setSimRiskPct] = useState(riskProfile?.risk_per_trade_pct ?? 1.0);
+  const [simResult, setSimResult] = useState<LabSimulate | null>(null);
+  const [simLoading, setSimLoading] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+
+  const runSimulate = async () => {
+    if (!repDateFrom || !repDateTo) { setSimError("Pick a date range above first."); return; }
+    setSimLoading(true); setSimError(null);
+    const res = await api.labSimulate(
+      { instrument: repInstrument, min_setup_score: repMinScore, scan_interval_minutes: simInterval, rr: simRr, sl_pct: simSlPct, risk_per_trade_pct: simRiskPct },
+      repDateFrom, repDateTo
+    );
+    if (!res) setSimError("Request failed.");
+    else if (res.error) setSimError(res.error);
+    else setSimResult(res);
+    setSimLoading(false);
+  };
+
+  // ---- Monte Carlo tab state ----
+  const [mcDateFrom, setMcDateFrom] = useState("");
+  const [mcDateTo, setMcDateTo] = useState("");
+  const [mcSimulations, setMcSimulations] = useState(1000);
+  const [mcResult, setMcResult] = useState<LabMonteCarlo | null>(null);
+  const [mcLoading, setMcLoading] = useState(false);
+  const [mcError, setMcError] = useState<string | null>(null);
+
+  const runMonteCarlo = async () => {
+    setMcLoading(true); setMcError(null);
+    const res = await api.labMonteCarlo(mcDateFrom || undefined, mcDateTo || undefined, mcSimulations);
+    if (!res) setMcError("Request failed.");
+    else if (res.error) setMcError(res.error);
+    else setMcResult(res);
+    setMcLoading(false);
+  };
+
+  // ---- Stress Tests tab state ----
+  const [stInstrument, setStInstrument] = useState("BTCUSD");
+  const [stTimeframe, setStTimeframe] = useState("15m");
+  const [stDateFrom, setStDateFrom] = useState("");
+  const [stDateTo, setStDateTo] = useState("");
+  const [stMinScore, setStMinScore] = useState(7.0);
+  const [stMinRr, setStMinRr] = useState(3.0);
+  const [stRiskPct, setStRiskPct] = useState(1.0);
+  const [stCapital, setStCapital] = useState(50000);
+  const [stResult, setStResult] = useState<LabStressTest | null>(null);
+  const [stLoading, setStLoading] = useState(false);
+  const [stError, setStError] = useState<string | null>(null);
+
+  const runStressTest = async () => {
+    if (!stDateFrom || !stDateTo) { setStError("Pick a date range first."); return; }
+    setStLoading(true); setStError(null);
+    const res = await api.labStressTest({
+      instrument: stInstrument, timeframe: stTimeframe, date_from: stDateFrom, date_to: stDateTo,
+      min_setup_score: stMinScore, min_rr: stMinRr, risk_per_trade_pct: stRiskPct, starting_capital: stCapital,
+    });
+    if (!res) setStError("Request failed.");
+    else if (res.error) setStError(res.error);
+    else setStResult(res);
+    setStLoading(false);
+  };
+
+  const exportableResult = () => {
+    if (activeTab === "Scenarios") return patternStats;
+    if (activeTab === "Backtests") return { rule: ruleResult, smc: smcResult };
+    if (activeTab === "Monte Carlo") return mcResult;
+    if (activeTab === "Stress Tests") return stResult;
+    return { replay: repResult, simulate: simResult };
+  };
+  const handleExport = () => {
+    const blob = new Blob([JSON.stringify(exportableResult(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `lab-${activeTab.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex flex-col gap-4" suppressHydrationWarning>
@@ -99,14 +294,10 @@ export default function LabPage() {
           </div>
           <div>
             <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>SCENARIO LAB</h1>
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Research, simulate, and validate your trading edge</p>
+            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Research, backtest, and stress-test your trading edge on real data</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>12 Jun 2026 – 12 Jun 2026</span>
-          <button type="button" className="btn-ghost flex items-center gap-1.5"><Download size={12} /> Export Results</button>
-          <button type="button" className="btn-primary flex items-center gap-1.5"><Plus size={13} /> New Scenario</button>
-        </div>
+        <button type="button" className="btn-ghost flex items-center gap-1.5" onClick={handleExport}><Download size={12} /> Export Results</button>
       </div>
 
       {/* Tab bar */}
@@ -116,283 +307,346 @@ export default function LabPage() {
         ))}
       </div>
 
-      {/* Stats strip */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
-        {[
-          { label: "Total Scenarios", value: totalScenarios, color: "var(--text-primary)" },
-          { label: "Avg Win Rate",    value: `${avgWinRate}%`,  color: "var(--color-bull)" },
-          { label: "Avg Return",      value: `+${avgReturn}R`,  color: "var(--color-bull)" },
-          { label: "Best Scenario",   value: `+${bestScenario.avgReturn}R`, color: "var(--color-bull)" },
-          { label: "Worst Scenario",  value: `${worstScenario.avgReturn}R`, color: "var(--color-bear)" },
-          { label: "Avg Prof. Factor",value: avgPF,             color: "var(--accent-primary)" },
-        ].map((s) => (
-          <div key={s.label} className="card" style={{ padding: "var(--space-3)" }}>
-            <div className="section-label mb-1">{s.label}</div>
-            <div className="font-mono font-bold" style={{ fontSize: "var(--text-xl)", color: s.color }}>{s.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Main grid: scatter + selected scenario */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "3fr 2fr" }}>
-        {/* Scatter plot */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="section-label">Scenario Performance Overview</span>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-                <span className="h-2.5 w-2.5 rounded-full inline-block" style={{ background: "var(--color-bull)" }} /> High Return/Win Rate
-                <span className="h-2.5 w-2.5 rounded-full inline-block ml-2" style={{ background: "var(--color-neutral)" }} /> Medium
-                <span className="h-2.5 w-2.5 rounded-full inline-block ml-2" style={{ background: "var(--color-bear)" }} /> Low Return
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>Return (R) ▼</button>
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", alignSelf: "center" }}>vs</span>
-            <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>Win Rate ▼</button>
-          </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <ScatterChart margin={{ top: 10, right: 30, bottom: 20, left: 10 }}>
-              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="winRate" type="number" name="Win Rate" unit="%" domain={[30, 80]}
-                tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }}
-                axisLine={false} tickLine={false} label={{ value: "Win Rate (%)", position: "insideBottom", offset: -10, fontSize: 10, fill: "#4a5568" }} />
-              <YAxis dataKey="avgReturn" type="number" name="Return" unit="R" domain={[-1.5, 4]}
-                tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }}
-                axisLine={false} tickLine={false} label={{ value: "Return (R)", angle: -90, position: "insideLeft", fontSize: 10, fill: "#4a5568" }} />
-              <Tooltip
-                cursor={{ strokeDasharray: "3 3", stroke: "rgba(255,255,255,0.1)" }}
-                contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
-                formatter={(_: unknown, name: string, props: any) => {
-                  const d = props.payload;
-                  return [`${d.name}: ${d.avgReturn}R / ${d.winRate}% WR`, ""];
-                }}
-              />
-              <Scatter
-                data={dynamicScenarios.map((s) => ({ ...s, fill: dotColor(s) }))}
-                shape={(props: any) => {
-                  const { cx, cy, payload } = props;
-                  const isSelected = payload.id === selectedId;
-                  return (
-                    <g onClick={() => setSelectedId(payload.id)} style={{ cursor: "pointer" }}>
-                      <circle cx={cx} cy={cy} r={isSelected ? 12 : 8} fill={dotColor(payload)} opacity={isSelected ? 1 : 0.75}
-                        stroke={isSelected ? "#fff" : "none"} strokeWidth={isSelected ? 2 : 0} />
-                      <text x={cx} y={cy - 14} textAnchor="middle" fill="#8a96a8" fontSize={9}>{payload.name.split(" ")[0]}</text>
-                    </g>
-                  );
-                }}
-              />
-            </ScatterChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Selected scenario */}
-        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div className="flex items-center justify-between">
-            <span className="section-label">Selected Scenario</span>
-            <span className={`badge ${selected.status === "Active" ? "badge-long" : "badge-neutral"}`}>
-              {selected.status === "Active" ? "HIGH PERFORMER" : "INACTIVE"}
-            </span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="h-2 w-2 rounded-full" style={{ background: selected.status === "Active" ? "var(--color-bull)" : "var(--color-bear)" }} />
-              <span className="font-bold" style={{ fontSize: "var(--text-lg)", color: "var(--text-primary)" }}>{selected.name}</span>
-            </div>
-            <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{selected.desc}</p>
+      {activeTab === "Scenarios" && (
+        <div className="grid gap-4" style={{ gridTemplateColumns: "3fr 2fr" }}>
+          <div className="card">
+            <div className="section-label mb-3">SMC Pattern Performance (real trade history)</div>
+            {patternStats.length === 0 ? (
+              <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>No closed trades tagged with a pattern yet.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <ScatterChart margin={{ top: 10, right: 30, bottom: 20, left: 10 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+                  <XAxis dataKey="win_rate" type="number" name="Win Rate" unit="%" domain={[0, 100]}
+                    tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }}
+                    axisLine={false} tickLine={false} label={{ value: "Win Rate (%)", position: "insideBottom", offset: -10, fontSize: 10, fill: "#4a5568" }} />
+                  <YAxis dataKey="avg_pnl_pct" type="number" name="Avg P&L" unit="%"
+                    tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }}
+                    axisLine={false} tickLine={false} label={{ value: "Avg P&L (%)", angle: -90, position: "insideLeft", fontSize: 10, fill: "#4a5568" }} />
+                  <Tooltip
+                    cursor={{ strokeDasharray: "3 3", stroke: "rgba(255,255,255,0.1)" }}
+                    contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                    formatter={(_: unknown, __: string, props: any) => {
+                      const d = props.payload;
+                      return [`${d.pattern_type}: ${pct(d.avg_pnl_pct)} / ${d.win_rate.toFixed(0)}% WR (${d.total_trades} trades)`, ""];
+                    }}
+                  />
+                  <Scatter
+                    data={patternStats}
+                    shape={(props: any) => {
+                      const { cx, cy, payload } = props;
+                      const isSelected = payload.pattern_type === selected?.pattern_type;
+                      const color = payload.win_rate >= 60 ? "var(--color-bull)" : payload.win_rate >= 45 ? "var(--color-neutral)" : "var(--color-bear)";
+                      return (
+                        <g onClick={() => setSelectedPattern(payload.pattern_type)} style={{ cursor: "pointer" }}>
+                          <circle cx={cx} cy={cy} r={isSelected ? 12 : 8} fill={color} opacity={isSelected ? 1 : 0.75}
+                            stroke={isSelected ? "#fff" : "none"} strokeWidth={isSelected ? 2 : 0} />
+                        </g>
+                      );
+                    }}
+                  />
+                </ScatterChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
-          {/* Stats 2x4 grid */}
-          <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            {[
-              { label: "Win Rate",      value: `${selected.winRate}%`,         color: "var(--color-bull)" },
-              { label: "Avg Return",    value: `${selected.avgReturn}R`,        color: selected.avgReturn >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
-              { label: "Profit Factor", value: selected.profitFactor.toFixed(1), color: selected.profitFactor >= 1.5 ? "var(--color-bull)" : "var(--color-bear)" },
-              { label: "Total Trades",  value: selected.trades,                 color: "var(--text-primary)" },
-              { label: "Expectancy",    value: `${selected.expectancy >= 0 ? "+" : ""}${selected.expectancy.toFixed(2)}R`, color: selected.expectancy >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
-              { label: "Max Drawdown",  value: `-${selected.maxDrawdown}%`,     color: "var(--color-bear)" },
-              { label: "Best Trade",    value: `+${selected.bestTrade}R`,        color: "var(--color-bull)" },
-              { label: "Worst Trade",   value: `${selected.worstTrade}R`,        color: "var(--color-bear)" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-lg p-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{s.label}</div>
-                <div className="font-mono font-bold" style={{ fontSize: "var(--text-md)", color: s.color }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Outcome donut */}
-          <div>
-            <div className="section-label mb-2">Outcome Distribution</div>
-            <div className="flex items-center gap-4">
-              <PieChart width={80} height={80}>
-                <Pie data={outcomeDist} cx={40} cy={40} innerRadius={24} outerRadius={38} dataKey="value" stroke="none" paddingAngle={2}>
-                  {outcomeDist.map((e, i) => <Cell key={i} fill={e.color} />)}
-                </Pie>
-              </PieChart>
-              <div className="flex flex-col gap-1">
-                {outcomeDist.map((d, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: d.color }} />
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{d.name}</span>
-                    <span className="font-mono font-semibold ml-auto" style={{ fontSize: "var(--text-xs)", color: "var(--text-primary)" }}>{d.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button type="button" className="btn-ghost flex-1 flex items-center justify-center gap-1.5" style={{ fontSize: "var(--text-xs)" }}>
-              <BarChart2 size={11} /> View Full Analysis
-            </button>
-            <button type="button" className="btn-ghost flex-1 flex items-center justify-center gap-1.5" style={{ fontSize: "var(--text-xs)" }}>
-              <Play size={11} /> Run Again
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* AI Insights */}
-      <div className="card">
-        <div className="section-label mb-3">AI Insights</div>
-        <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          {aiInsights.map((ins, i) => (
-            <div key={i} className="flex items-start gap-2 rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
-              <span style={{ fontSize: "var(--text-md)" }}>{ins.icon}</span>
-              <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5 }}>{ins.text}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Market Conditions + Timeframe + Equity Curve */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 2fr" }}>
-        {/* Market Conditions */}
-        <div className="card">
-          <div className="section-label mb-3">Market Conditions</div>
-          <div className="flex flex-col gap-3">
-            {marketConditions.map((mc) => (
-              <div key={mc.label}>
-                <div className="flex justify-between mb-1">
-                  <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{mc.label}</span>
-                  <span className="font-mono font-bold" style={{ fontSize: "var(--text-sm)", color: mc.color }}>{mc.value}%</span>
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${mc.value}%`, background: mc.color }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Timeframe Analysis */}
-        <div className="card">
-          <div className="section-label mb-3">Timeframe Analysis</div>
-          <div className="grid grid-cols-4 gap-1 mb-3">
-            {TIMEFRAMES.map((tf) => (
-              <button key={tf} type="button" onClick={() => setActiveTF(tf)}
-                className="rounded-md py-1.5 text-center font-semibold transition-all"
-                style={{ fontSize: "var(--text-xs)", background: activeTF === tf ? "var(--accent-primary)" : "var(--bg-elevated)", color: activeTF === tf ? "#fff" : "var(--text-secondary)", border: "1px solid var(--border-subtle)" }}>
-                {tf}
-              </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { label: "Best TF",  value: "4H",    color: "var(--color-bull)" },
-              { label: "Win Rate", value: "68%",   color: "var(--color-bull)" },
-              { label: "Return",   value: "+2.3R", color: "var(--color-bull)" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-lg p-2 text-center" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{s.label}</div>
-                <div className="font-mono font-bold" style={{ fontSize: "var(--text-md)", color: s.color }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Equity Curve */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="section-label">Equity Curve (Scenario)</span>
-            <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>Cumulative Return (R) ▼</button>
-          </div>
-          <ResponsiveContainer width="100%" height={110}>
-            <AreaChart data={equityCurve} margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
-              <defs>
-                <linearGradient id="labGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#26d07c" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#26d07c" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#4a5568" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: "#4a5568", fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => `${v}R`} />
-              <Tooltip contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }} />
-              <Area type="monotone" dataKey="value" stroke="#26d07c" strokeWidth={2} fill="url(#labGrad)" dot={false} />
-            </AreaChart>
-          </ResponsiveContainer>
-          <div className="grid grid-cols-4 gap-2 mt-3">
-            {[
-              { label: "Starting Bal", value: "₹50,000" },
-              { label: "Ending Bal",   value: "₹62,450" },
-              { label: "Max Drawdown", value: "-4.1%" },
-              { label: "Sharpe",       value: "1.84" },
-            ].map((s) => (
-              <div key={s.label} className="text-center">
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{s.label}</div>
-                <div className="font-mono font-semibold" style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* All Scenarios table */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <span className="section-label">All Scenarios</span>
-          <button type="button" className="btn-ghost" style={{ padding: "3px 10px", fontSize: "var(--text-xs)" }}>View All Scenarios</button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                {["#", "Scenario Name", "Conditions", "Win Rate", "Avg Return", "Profit Factor", "Trades", "Status", "Action"].map((h) => (
-                  <th key={h} className="pb-2 text-left font-semibold pr-3 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {dynamicScenarios.map((s) => (
-                <tr key={s.id} onClick={() => setSelectedId(s.id)} style={{ borderBottom: "1px solid var(--border-subtle)", cursor: "pointer", background: selectedId === s.id ? "rgba(108,99,255,0.05)" : "transparent" }}>
-                  <td className="py-2 pr-3 font-mono" style={{ color: "var(--text-muted)" }}>{s.id}</td>
-                  <td className="py-2 pr-3 font-semibold" style={{ color: "var(--text-primary)" }}>{s.name}</td>
-                  <td className="py-2 pr-3" style={{ color: "var(--text-secondary)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.conditions}</td>
-                  <td className="py-2 pr-3 font-mono font-bold" style={{ color: s.winRate >= 60 ? "var(--color-bull)" : "var(--color-bear)" }}>{s.winRate}%</td>
-                  <td className="py-2 pr-3 font-mono font-bold" style={{ color: s.avgReturn >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
-                    {s.avgReturn >= 0 ? "+" : ""}{s.avgReturn}%
-                  </td>
-                  <td className="py-2 pr-3 font-mono" style={{ color: s.profitFactor >= 1.5 ? "var(--color-bull)" : "var(--color-bear)" }}>{s.profitFactor.toFixed(1)}</td>
-                  <td className="py-2 pr-3 font-mono" style={{ color: "var(--text-muted)" }}>{s.trades}</td>
-                  <td className="py-2 pr-3">
-                    <span style={{ fontWeight: 700, fontSize: "var(--text-xs)", color: s.status === "Active" ? "var(--color-bull)" : "var(--text-muted)" }}>
-                      {s.status === "Active" ? "● Active" : "○ Inactive"}
-                    </span>
-                  </td>
-                  <td className="py-2">
-                    <div className="flex items-center gap-2">
-                      <button type="button" title="Run" style={{ color: "var(--text-accent)" }}><Play size={12} /></button>
-                      <button type="button" title="Chart" style={{ color: "var(--text-secondary)" }}><BarChart2 size={12} /></button>
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <span className="section-label">Selected Pattern</span>
+            {!selected ? (
+              <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Select a pattern from the chart.</p>
+            ) : (
+              <>
+                <div className="font-bold" style={{ fontSize: "var(--text-lg)", color: "var(--text-primary)" }}>{selected.pattern_type}</div>
+                <StatGrid items={[
+                  { label: "Win Rate", value: `${selected.win_rate.toFixed(1)}%`, color: selected.win_rate >= 50 ? "var(--color-bull)" : "var(--color-bear)" },
+                  { label: "Avg P&L", value: pct(selected.avg_pnl_pct), color: selected.avg_pnl_pct >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                  { label: "Total Trades", value: String(selected.total_trades) },
+                  { label: "Avg Confidence", value: selected.avg_confidence != null ? `${selected.avg_confidence.toFixed(1)}/10` : "—" },
+                  { label: "Deployed", value: selected.enabled ? "Yes" : "No", color: selected.enabled ? "var(--color-bull)" : "var(--text-muted)" },
+                ]} />
+                <div>
+                  <div className="section-label mb-2">Outcome Distribution</div>
+                  <div className="flex items-center gap-4">
+                    <PieChart width={80} height={80}>
+                      <Pie data={[
+                        { name: "Win", value: Math.round(selected.win_rate * selected.total_trades / 100), color: "var(--color-bull)" },
+                        { name: "Loss", value: selected.total_trades - Math.round(selected.win_rate * selected.total_trades / 100), color: "var(--color-bear)" },
+                      ]} cx={40} cy={40} innerRadius={24} outerRadius={38} dataKey="value" stroke="none" paddingAngle={2}>
+                        {[{ color: "var(--color-bull)" }, { color: "var(--color-bear)" }].map((e, i) => <Cell key={i} fill={e.color} />)}
+                      </Pie>
+                    </PieChart>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--color-bull)" }} /><span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Win</span></div>
+                      <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--color-bear)" }} /><span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Loss</span></div>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {activeTab === "Backtests" && (
+        <div className="flex flex-col gap-4">
+          <div className="card">
+            <div className="section-label mb-3">Rule Backtest — apply a behavioral rule to your imported trade history</div>
+            <div className="flex flex-wrap items-end gap-3 mb-3">
+              <div>
+                <FieldLabel>Rule</FieldLabel>
+                <Select value={ruleKey} onChange={setRuleKey} options={[
+                  ...Object.entries(PREBUILT_RULES).map(([k, v]) => ({ value: k, label: v })),
+                  { value: "custom", label: "Custom rule (AI-interpreted)…" },
+                ]} />
+              </div>
+              {ruleKey === "custom" && (
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <FieldLabel>Describe the rule in plain English</FieldLabel>
+                  <input value={customRule} onChange={(e) => setCustomRule(e.target.value)} placeholder="e.g. no trades on red CPI days"
+                    style={{ width: "100%", background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", color: "var(--text-primary)", fontSize: "var(--text-xs)", padding: "5px 8px", outline: "none" }} />
+                </div>
+              )}
+              <div><FieldLabel>From</FieldLabel><DateInput value={ruleDateFrom} onChange={setRuleDateFrom} /></div>
+              <div><FieldLabel>To</FieldLabel><DateInput value={ruleDateTo} onChange={setRuleDateTo} /></div>
+              <RunButton onClick={runRuleBacktest} loading={ruleLoading} />
+            </div>
+            {ruleError && <ErrorBox message={ruleError} />}
+            {ruleResult && !ruleError && (
+              <div className="flex flex-col gap-3 mt-2">
+                <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                  <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+                    <div className="section-label mb-2">Without Rule</div>
+                    <StatGrid items={[
+                      { label: "Trades", value: String(ruleResult.original.trades) },
+                      { label: "P&L", value: inr(ruleResult.original.pnl_inr), color: ruleResult.original.pnl_inr >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                      { label: "Win Rate", value: `${ruleResult.original.win_rate.toFixed(1)}%` },
+                    ]} />
+                  </div>
+                  <div className="rounded-lg p-3" style={{ background: "rgba(108,99,255,0.06)", border: "1px solid rgba(108,99,255,0.25)" }}>
+                    <div className="section-label mb-2">With Rule</div>
+                    <StatGrid items={[
+                      { label: "Trades", value: String(ruleResult.with_rule.trades) },
+                      { label: "P&L", value: inr(ruleResult.with_rule.pnl_inr), color: ruleResult.with_rule.pnl_inr >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                      { label: "Win Rate", value: `${ruleResult.with_rule.win_rate.toFixed(1)}%` },
+                    ]} />
+                  </div>
+                </div>
+                <p style={{ fontSize: "var(--text-xs)", color: ruleResult.pnl_improvement_inr >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
+                  {ruleResult.trades_removed} trades removed · {inr(ruleResult.pnl_improvement_inr)} P&L change · {pct(ruleResult.win_rate_change)} win-rate change
+                </p>
+                <ResponsiveContainer width="100%" height={160}>
+                  <LineChart data={ruleResult.curve.dates.map((d, i) => ({ date: d, original: ruleResult.curve.original[i], with_rule: ruleResult.curve.with_rule[i] }))}>
+                    <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#4a5568" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#4a5568" }} axisLine={false} tickLine={false} width={50} />
+                    <Tooltip contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="original" stroke="#4a5568" strokeWidth={1.5} dot={false} name="Original" />
+                    <Line type="monotone" dataKey="with_rule" stroke="var(--color-bull)" strokeWidth={2} dot={false} name="With Rule" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="section-label mb-3">SMC Engine Backtest — replay the boardroom's pattern engine over real candles</div>
+            <div className="flex flex-wrap items-end gap-3 mb-3">
+              <div><FieldLabel>Instrument</FieldLabel><Select value={smcInstrument} onChange={setSmcInstrument} options={INSTRUMENTS.map((i) => ({ value: i, label: i }))} /></div>
+              <div><FieldLabel>Timeframe</FieldLabel><Select value={smcTimeframe} onChange={setSmcTimeframe} options={LAB_TIMEFRAMES.map((t) => ({ value: t, label: t }))} /></div>
+              <div><FieldLabel>From</FieldLabel><DateInput value={smcDateFrom} onChange={setSmcDateFrom} /></div>
+              <div><FieldLabel>To</FieldLabel><DateInput value={smcDateTo} onChange={setSmcDateTo} /></div>
+              <div><FieldLabel>Train/test split</FieldLabel><DateInput value={smcTrainEnd} onChange={setSmcTrainEnd} /></div>
+              <div><FieldLabel>Min Score</FieldLabel><NumberInput value={smcMinScore} onChange={setSmcMinScore} min={1} max={10} step={0.5} /></div>
+              <div><FieldLabel>Min RR</FieldLabel><NumberInput value={smcMinRr} onChange={setSmcMinRr} min={0.5} max={10} step={0.5} suffix="R" /></div>
+              <div><FieldLabel>Risk/Trade</FieldLabel><NumberInput value={smcRiskPct} onChange={setSmcRiskPct} min={0.1} max={5} step={0.1} suffix="%" /></div>
+              <div><FieldLabel>Capital</FieldLabel><NumberInput value={smcCapital} onChange={setSmcCapital} min={1000} max={10000000} step={1000} suffix="₹" /></div>
+              <RunButton onClick={runSmcBacktest} loading={smcLoading} />
+            </div>
+            {smcError && <ErrorBox message={smcError} />}
+            {smcResult && !smcError && (
+              <div className="flex flex-col gap-3 mt-2">
+                {smcResult.train_stats && smcResult.test_stats ? (
+                  <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                    <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+                      <div className="section-label mb-2">Train</div>
+                      <StatGrid items={statsRow(smcResult.train_stats)} />
+                    </div>
+                    <div className="rounded-lg p-3" style={{ background: "rgba(108,99,255,0.06)", border: "1px solid rgba(108,99,255,0.25)" }}>
+                      <div className="section-label mb-2">Test (out-of-sample)</div>
+                      <StatGrid items={statsRow(smcResult.test_stats)} />
+                    </div>
+                  </div>
+                ) : (
+                  <StatGrid items={statsRow(smcResult.stats)} />
+                )}
+                <ResponsiveContainer width="100%" height={160}>
+                  <LineChart data={smcResult.stats.equity_curve.map((p, i) => ({ idx: i, equity: p.equity }))}>
+                    <XAxis dataKey="idx" tick={{ fontSize: 10, fill: "#4a5568" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#4a5568" }} axisLine={false} tickLine={false} width={56} />
+                    <Tooltip contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }} />
+                    <Line type="monotone" dataKey="equity" stroke="var(--color-bull)" strokeWidth={2} dot={false} name="Equity" />
+                  </LineChart>
+                </ResponsiveContainer>
+                <p style={{ fontSize: "9px", color: "var(--text-muted)" }}>{smcResult.disclaimer}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "Monte Carlo" && (
+        <div className="card">
+          <div className="section-label mb-3">Monte Carlo — bootstrap-resample your real trade history to estimate risk of ruin</div>
+          <div className="flex flex-wrap items-end gap-3 mb-3">
+            <div><FieldLabel>From (optional)</FieldLabel><DateInput value={mcDateFrom} onChange={setMcDateFrom} /></div>
+            <div><FieldLabel>To (optional)</FieldLabel><DateInput value={mcDateTo} onChange={setMcDateTo} /></div>
+            <div><FieldLabel>Simulations</FieldLabel><NumberInput value={mcSimulations} onChange={setMcSimulations} min={100} max={5000} step={100} /></div>
+            <RunButton onClick={runMonteCarlo} loading={mcLoading} />
+          </div>
+          {mcError && <ErrorBox message={mcError} />}
+          {mcResult && !mcError && (
+            <div className="flex flex-col gap-4 mt-2">
+              <StatGrid items={[
+                { label: "Trades Used", value: String(mcResult.trades_used) },
+                { label: "Probability of Ruin", value: `${(mcResult.probability_of_ruin * 100).toFixed(1)}%`, color: mcResult.probability_of_ruin > 0.1 ? "var(--color-bear)" : "var(--color-bull)" },
+                { label: "Median Return", value: pct(mcResult.final_return_pct.p50), color: mcResult.final_return_pct.p50 >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                { label: "5th %ile Return", value: pct(mcResult.final_return_pct.p5), color: "var(--color-bear)" },
+                { label: "95th %ile Return", value: pct(mcResult.final_return_pct.p95), color: "var(--color-bull)" },
+                { label: "Median Max Drawdown", value: `-${mcResult.max_drawdown_pct.p50.toFixed(1)}%`, color: "var(--color-bear)" },
+                { label: "95th %ile Drawdown", value: `-${mcResult.max_drawdown_pct.p95.toFixed(1)}%`, color: "var(--color-bear)" },
+              ]} />
+              <div>
+                <div className="section-label mb-2">Equity Fan Chart (5th / 50th / 95th percentile across {mcResult.simulations} simulated paths)</div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={mcResult.fan_chart}>
+                    <XAxis dataKey="checkpoint" tick={{ fontSize: 10, fill: "#4a5568" }} axisLine={false} tickLine={false} label={{ value: "Trades", position: "insideBottom", offset: -5, fontSize: 10, fill: "#4a5568" }} />
+                    <YAxis tick={{ fontSize: 10, fill: "#4a5568" }} axisLine={false} tickLine={false} width={64} />
+                    <Tooltip contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="p95" stroke="var(--color-bull)" strokeWidth={1} strokeDasharray="4 4" dot={false} name="95th %ile" />
+                    <Line type="monotone" dataKey="p50" stroke="var(--accent-primary)" strokeWidth={2} dot={false} name="Median" />
+                    <Line type="monotone" dataKey="p5" stroke="var(--color-bear)" strokeWidth={1} strokeDasharray="4 4" dot={false} name="5th %ile" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <p style={{ fontSize: "9px", color: "var(--text-muted)" }}>{mcResult.disclaimer}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "Stress Tests" && (
+        <div className="card">
+          <div className="section-label mb-3">Stress Test — how the SMC backtest degrades under adverse conditions</div>
+          <div className="flex flex-wrap items-end gap-3 mb-3">
+            <div><FieldLabel>Instrument</FieldLabel><Select value={stInstrument} onChange={setStInstrument} options={INSTRUMENTS.map((i) => ({ value: i, label: i }))} /></div>
+            <div><FieldLabel>Timeframe</FieldLabel><Select value={stTimeframe} onChange={setStTimeframe} options={LAB_TIMEFRAMES.map((t) => ({ value: t, label: t }))} /></div>
+            <div><FieldLabel>From</FieldLabel><DateInput value={stDateFrom} onChange={setStDateFrom} /></div>
+            <div><FieldLabel>To</FieldLabel><DateInput value={stDateTo} onChange={setStDateTo} /></div>
+            <div><FieldLabel>Min Score</FieldLabel><NumberInput value={stMinScore} onChange={setStMinScore} min={1} max={10} step={0.5} /></div>
+            <div><FieldLabel>Min RR</FieldLabel><NumberInput value={stMinRr} onChange={setStMinRr} min={0.5} max={10} step={0.5} suffix="R" /></div>
+            <div><FieldLabel>Risk/Trade</FieldLabel><NumberInput value={stRiskPct} onChange={setStRiskPct} min={0.1} max={5} step={0.1} suffix="%" /></div>
+            <div><FieldLabel>Capital</FieldLabel><NumberInput value={stCapital} onChange={setStCapital} min={1000} max={10000000} step={1000} suffix="₹" /></div>
+            <RunButton onClick={runStressTest} loading={stLoading} />
+          </div>
+          {stError && <ErrorBox message={stError} />}
+          {stResult && !stError && (
+            <div className="overflow-x-auto mt-2">
+              <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                    {["Scenario", "Win Rate", "Avg RR", "Max Drawdown", "Total Return", "Expectancy"].map((h) => (
+                      <th key={h} className="pb-2 text-left font-semibold pr-4" style={{ color: "var(--text-secondary)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { label: "Base", stats: stResult.base },
+                    { label: "Added Slippage (−0.1R)", stats: stResult.scenarios.added_slippage },
+                    { label: "Win-Rate Shock (bottom 20% wins flipped)", stats: stResult.scenarios.win_rate_shock },
+                    { label: "Doubled Risk/Trade", stats: stResult.scenarios.doubled_risk },
+                  ].map((row, i) => (
+                    <tr key={row.label} style={{ borderBottom: "1px solid var(--border-subtle)", background: i === 0 ? "rgba(108,99,255,0.05)" : "transparent" }}>
+                      <td className="py-2 pr-4 font-semibold" style={{ color: "var(--text-primary)" }}>{row.label}</td>
+                      <td className="py-2 pr-4 font-mono font-bold" style={{ color: row.stats.win_rate_pct >= stResult.base.win_rate_pct ? "var(--color-bull)" : "var(--color-bear)" }}>{row.stats.win_rate_pct.toFixed(1)}%</td>
+                      <td className="py-2 pr-4 font-mono">{row.stats.avg_rr.toFixed(2)}R</td>
+                      <td className="py-2 pr-4 font-mono font-bold" style={{ color: row.stats.max_drawdown_pct <= stResult.base.max_drawdown_pct ? "var(--color-bull)" : "var(--color-bear)" }}>-{row.stats.max_drawdown_pct.toFixed(1)}%</td>
+                      <td className="py-2 pr-4 font-mono font-bold" style={{ color: row.stats.total_return_pct >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>{pct(row.stats.total_return_pct)}</td>
+                      <td className="py-2 font-mono" style={{ color: row.stats.expectancy >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>{row.stats.expectancy >= 0 ? "+" : ""}{row.stats.expectancy.toFixed(2)}R</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ fontSize: "9px", color: "var(--text-muted)", marginTop: 8 }}>{stResult.disclaimer}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "Market Simulator" && (
+        <div className="flex flex-col gap-4">
+          <div className="card">
+            <div className="section-label mb-3">Market Replay — what would the SMC engine have flagged? (deterministic, no LLM)</div>
+            <div className="flex flex-wrap items-end gap-3 mb-3">
+              <div><FieldLabel>Instrument</FieldLabel><Select value={repInstrument} onChange={setRepInstrument} options={INSTRUMENTS.map((i) => ({ value: i, label: i }))} /></div>
+              <div><FieldLabel>From</FieldLabel><DateInput value={repDateFrom} onChange={setRepDateFrom} /></div>
+              <div><FieldLabel>To</FieldLabel><DateInput value={repDateTo} onChange={setRepDateTo} /></div>
+              <div><FieldLabel>Min Score</FieldLabel><NumberInput value={repMinScore} onChange={setRepMinScore} min={1} max={10} step={0.5} /></div>
+              <RunButton onClick={runReplay} loading={repLoading} />
+            </div>
+            {repError && <ErrorBox message={repError} />}
+            {repResult && !repError && (
+              <div className="flex flex-col gap-3 mt-2">
+                <StatGrid items={[
+                  { label: "Signals Found", value: String(repResult.signals_found) },
+                  { label: "Wins", value: String(repResult.wins), color: "var(--color-bull)" },
+                  { label: "Losses", value: String(repResult.losses), color: "var(--color-bear)" },
+                  { label: "Total R", value: `${repResult.total_r >= 0 ? "+" : ""}${repResult.total_r}R`, color: repResult.total_r >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                ]} />
+                {repResult.decisions.length > 0 && (
+                  <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
+                    <thead><tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>{["Time", "Direction", "Score", "Outcome", "R"].map((h) => <th key={h} className="pb-2 text-left font-semibold pr-4" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {repResult.decisions.slice(0, 30).map((d, i) => (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                          <td className="py-1.5 pr-4 font-mono" style={{ color: "var(--text-muted)" }}>{d.time}</td>
+                          <td className="py-1.5 pr-4 font-bold" style={{ color: d.direction === "long" ? "var(--color-bull)" : "var(--color-bear)" }}>{d.direction.toUpperCase()}</td>
+                          <td className="py-1.5 pr-4 font-mono">{d.score}/10</td>
+                          <td className="py-1.5 pr-4">{d.outcome ?? "—"}</td>
+                          <td className="py-1.5 font-mono" style={{ color: (d.r_multiple ?? 0) >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>{d.r_multiple != null ? `${d.r_multiple >= 0 ? "+" : ""}${d.r_multiple}R` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="section-label mb-3">Custom Strategy Simulation — replay with a custom risk config (uses date range above)</div>
+            <div className="flex flex-wrap items-end gap-3 mb-3">
+              <div><FieldLabel>Scan Interval</FieldLabel><NumberInput value={simInterval} onChange={setSimInterval} min={5} max={240} step={5} suffix="min" /></div>
+              <div><FieldLabel>RR</FieldLabel><NumberInput value={simRr} onChange={setSimRr} min={0.5} max={10} step={0.5} suffix="R" /></div>
+              <div><FieldLabel>SL</FieldLabel><NumberInput value={simSlPct} onChange={setSimSlPct} min={0.1} max={5} step={0.1} suffix="%" /></div>
+              <div><FieldLabel>Risk/Trade</FieldLabel><NumberInput value={simRiskPct} onChange={setSimRiskPct} min={0.1} max={5} step={0.1} suffix="%" /></div>
+              <RunButton onClick={runSimulate} loading={simLoading} />
+            </div>
+            {simError && <ErrorBox message={simError} />}
+            {simResult && !simError && (
+              <div className="flex flex-col gap-3 mt-2">
+                <StatGrid items={[
+                  { label: "Trades Taken", value: String(simResult.trades_taken) },
+                  { label: "Win Rate", value: simResult.win_rate != null ? `${simResult.win_rate.toFixed(1)}%` : "—" },
+                  { label: "Simulated P&L", value: inr(simResult.simulated_pnl_inr), color: simResult.simulated_pnl_inr >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                  { label: "Total R", value: `${simResult.total_r >= 0 ? "+" : ""}${simResult.total_r}R`, color: simResult.total_r >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                ]} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

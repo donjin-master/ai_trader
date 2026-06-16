@@ -62,6 +62,7 @@ class Trade(Base):
     position_params: Mapped[dict | None] = mapped_column(JSONB)  # sizing calculation
     trigger_event_type: Mapped[str | None] = mapped_column(String, server_default=text("'scheduled_scan'"))
     scenario_simulation: Mapped[dict | None] = mapped_column(JSONB)
+    notes: Mapped[str | None] = mapped_column(Text)  # user-written notes (Journal page)
     created_at: Mapped[datetime] = mapped_column(
 
         TIMESTAMP(timezone=True), server_default=text("now()")
@@ -146,7 +147,7 @@ class RiskProfile(Base):
     trade_end_time: Mapped[str] = mapped_column(String, server_default=text("'23:00'"))
     blackout_windows: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     active_instruments: Mapped[list | None] = mapped_column(
-        JSONB, server_default=text("""'["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP", "XAUUSD_PERP"]'::jsonb""")
+        JSONB, server_default=text("""'["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]'::jsonb""")
     )
     avoid_weekends: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # Risk controls
@@ -186,6 +187,9 @@ class RiskProfile(Base):
     preferred_dte_max: Mapped[int] = mapped_column(Integer, server_default=text("21"))
     iv_regime_threshold_low: Mapped[int] = mapped_column(Integer, server_default=text("30"))
     iv_regime_threshold_high: Mapped[int] = mapped_column(Integer, server_default=text("70"))
+    # V1.4 — strategy deploy: allow-list of SMC pattern_types the AI may act on.
+    # Empty list = no restriction (all patterns allowed).
+    enabled_patterns: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     updated_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )

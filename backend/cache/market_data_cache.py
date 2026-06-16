@@ -86,10 +86,10 @@ class MarketDataCache:
         if data_type.startswith("candles_"):
             tf_map = {
                 "candles_15m": ("15", 100),
-                "candles_1h": ("60", 100),
-                "candles_4h": ("240", 100),
-                "candles_1d": ("1440", 10),
-                "candles_1w": ("10080", 5),
+                "candles_1h": ("60", 300),
+                "candles_4h": ("240", 300),
+                "candles_1d": ("1440", 100),
+                "candles_1w": ("10080", 50),
             }
             resolution, limit = tf_map[data_type]
             return await self.delta.get_candles(self.instrument, resolution, limit)

@@ -66,6 +66,7 @@ def _trade_to_dict(trade: Trade, full: bool = False) -> dict:
     data["scenario_simulation"] = trade.scenario_simulation
     data["options_strategy"] = decision_json.get("options_strategy")
     data["regime"] = smc.get("regime")
+    data["notes"] = trade.notes
 
     if full:
         data["decision_json"] = decision_json
@@ -152,7 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         _event_router = _EventRouter(dispatcher=_dispatcher)
         _stream_processor = MarketStreamProcessor(
-            instruments=["BTCUSD_PERP", "ETHUSD_PERP", "XAUUSD_PERP", "SOLUSD_PERP"],
+            instruments=["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"],
             event_router=_event_router,
             cache_registry=_registry,
         )
@@ -602,6 +603,22 @@ async def update_lesson_quality(lesson_id: str, payload: dict) -> dict:
         await session.commit()
 
     return {"status": "success", "quality_score": quality_score}
+
+
+@app.put("/api/trades/{trade_id}/notes")
+async def update_trade_notes(trade_id: str, payload: dict) -> dict:
+    try:
+        trade_uuid = uuid.UUID(trade_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid trade_id format")
+
+    async with AsyncSessionLocal() as session:
+        trade = await session.get(Trade, trade_uuid)
+        if trade is None:
+            raise HTTPException(status_code=404, detail="trade not found")
+        trade.notes = payload.get("notes")
+        await session.commit()
+        return {"id": trade_id, "notes": trade.notes}
 
 
 @app.get("/api/trades")
@@ -1993,6 +2010,45 @@ async def lab_simulate_strategy(payload: dict) -> dict:
         raise HTTPException(status_code=502, detail=str(exc))
 
 
+@app.post("/api/lab/monte-carlo")
+async def lab_monte_carlo(payload: dict) -> dict:
+    from backend.lab.engine import monte_carlo_simulation
+
+    try:
+        return await monte_carlo_simulation(
+            date_from=payload.get("date_from"),
+            date_to=payload.get("date_to"),
+            simulations=int(payload.get("simulations", 1000)),
+            starting_capital=payload.get("starting_capital"),
+            ruin_threshold_pct=float(payload.get("ruin_threshold_pct", 50.0)),
+        )
+    except Exception as exc:
+        logger.exception("Monte Carlo simulation failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/lab/stress-test")
+async def lab_stress_test(config: dict) -> dict:
+    from backend.lab.stress import run_stress_test
+
+    try:
+        return await run_stress_test(
+            instrument=config["instrument"],
+            timeframe=config.get("timeframe", "15m"),
+            date_from=config["date_from"],
+            date_to=config["date_to"],
+            min_setup_score=float(config.get("min_setup_score", 7.0)),
+            min_rr=float(config.get("min_rr", 3.0)),
+            risk_per_trade_pct=float(config.get("risk_per_trade_pct", 1.0)),
+            starting_capital=float(config.get("starting_capital", 50000)),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"missing field: {exc}")
+    except Exception as exc:
+        logger.exception("Stress test failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @app.post("/api/replay/analyse")
 async def replay_analyse(body: dict) -> dict:
     from backend.perception.smc import smc_analyser
@@ -2031,30 +2087,77 @@ async def run_smc_backtest(config: dict) -> dict:
         raise HTTPException(status_code=502, detail=str(exc))
 
 
+# The full set of SMC pattern types the boardroom can be tagged with —
+# mirrors backend.perception.smc.SMCAnalyser.classify_pattern_type()'s return values.
+KNOWN_PATTERN_TYPES = [
+    "ob_fvg_sweep_confluence", "ob_fvg_confluence", "liquidity_sweep_choch",
+    "ob_after_sweep", "fvg_after_sweep", "choch_entry", "bos_continuation",
+    "inducement_setup", "general_smc",
+]
+
+
 @app.get("/api/patterns/stats")
 async def get_pattern_stats() -> list[dict]:
+    """Per-pattern-type performance + strategy deploy state for the Autonomous page."""
+    from backend.execution.risk_profile import risk_manager
+
     async with AsyncSessionLocal() as session:
         rows = await session.execute(
             text(
                 """
-                SELECT pattern_type, instrument, session,
-                       COUNT(*) AS sample_size,
-                       ROUND(AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END) * 100, 1) AS win_rate_pct,
-                       ROUND(AVG(rr_achieved), 2) AS avg_rr,
-                       ROUND(
-                         COALESCE(AVG(rr_achieved), 0) *
-                         AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END) -
-                         (1 - AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END)),
-                         3
-                       ) AS expectancy
+                SELECT pattern_type,
+                       COUNT(*) AS total_trades,
+                       ROUND(AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END) * 100, 1) AS win_rate,
+                       ROUND(AVG(pnl_pct), 2) AS avg_pnl_pct,
+                       ROUND(AVG(boardroom_confidence), 1) AS avg_confidence
                 FROM pattern_outcomes
-                GROUP BY pattern_type, instrument, session
-                HAVING COUNT(*) >= 10
-                ORDER BY expectancy DESC
+                GROUP BY pattern_type
+                ORDER BY total_trades DESC
                 """
             )
         )
-        return [dict(r._mapping) for r in rows.all()]
+        traded = [dict(r._mapping) for r in rows.all()]
+
+    profile = await risk_manager.get_profile()
+    enabled_patterns = profile.get("enabled_patterns") or []
+    seen = {r["pattern_type"] for r in traded}
+    for r in traded:
+        r["enabled"] = r["pattern_type"] in enabled_patterns if enabled_patterns else True
+        r["untraded"] = False
+    untraded = [
+        {
+            "pattern_type": p,
+            "total_trades": 0,
+            "win_rate": 0.0,
+            "avg_pnl_pct": 0.0,
+            "avg_confidence": None,
+            "enabled": p in enabled_patterns if enabled_patterns else True,
+            "untraded": True,
+        }
+        for p in KNOWN_PATTERN_TYPES
+        if p not in seen
+    ]
+    return traded + untraded
+
+
+@app.post("/api/patterns/{pattern_type}/toggle")
+async def toggle_pattern(pattern_type: str, body: dict) -> dict:
+    """Deploy/undeploy an SMC pattern type — enforced as an allow-list in the decision loop."""
+    from backend.execution.risk_profile import risk_manager
+
+    if pattern_type not in KNOWN_PATTERN_TYPES:
+        raise HTTPException(status_code=400, detail=f"unknown pattern_type: {pattern_type}")
+    enabled = bool(body.get("enabled"))
+    profile = await risk_manager.get_profile()
+    current = set(profile.get("enabled_patterns") or [])
+    if enabled:
+        current.add(pattern_type)
+    else:
+        current.discard(pattern_type)
+    # If every known pattern ends up enabled, store [] (no-restriction) for simplicity/back-compat.
+    new_list = [] if current == set(KNOWN_PATTERN_TYPES) else sorted(current)
+    updated = await risk_manager.update_profile({"enabled_patterns": new_list})
+    return {"pattern_type": pattern_type, "enabled": enabled, "enabled_patterns": updated["enabled_patterns"]}
 
 
 @app.get("/api/calibration")
