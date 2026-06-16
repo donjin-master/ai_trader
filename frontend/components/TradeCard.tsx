@@ -19,7 +19,7 @@ function Section({
     <div className="border-t border-zinc-800 pt-2">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full text-left text-sm font-semibold text-zinc-300 hover:text-zinc-100"
+        className="w-full py-2 text-left text-sm font-semibold text-zinc-300 hover:text-zinc-100"
       >
         {title} {open ? "▲" : "▼"}
       </button>

@@ -290,7 +290,11 @@ html, body {
     flex-wrap: nowrap;
   }
   .tab-bar::-webkit-scrollbar { display: none; }
-  .tab { flex-shrink: 0; }
+  .tab { flex-shrink: 0; padding: 12px 14px; }
+
+  /* Bump tap targets on interactive nav/buttons for mobile */
+  .nav-item, .bottom-nav-item { min-height: 44px; }
+  .btn-primary, .btn-ghost, .btn-danger, .btn-success { min-height: 40px; }
 }
 
 /* ── Bottom nav (mobile) ──────────────────────── */
