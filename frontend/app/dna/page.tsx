@@ -171,21 +171,21 @@ export default function DnaPage() {
   return (
     <div className="flex flex-col gap-4" suppressHydrationWarning>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg"
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
             style={{ background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.25)" }}>
             <Dna size={18} style={{ color: "var(--accent-primary)" }} />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>TRADING DNA</h1>
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Your unique trading blueprint built from data, not guesswork</p>
+            <p className="hidden sm:block" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Your unique trading blueprint built from data, not guesswork</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>12 Jun 2026 – 12 Jun 2026</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="hidden sm:inline" style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>12 Jun 2026 – 12 Jun 2026</span>
           <button type="button" onClick={handleExport} className="btn-ghost flex items-center gap-1.5">
-            <Download size={12} /> Export DNA Report
+            <Download size={12} /> <span className="hidden sm:inline">Export DNA Report</span>
           </button>
         </div>
       </div>
@@ -198,7 +198,7 @@ export default function DnaPage() {
       </div>
 
       {/* Score tiles with mini sparklines — visible on every tab for context */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
         {scores.map((s) => (
           <div key={s.label} className="card" style={{ padding: "var(--space-3)", position: "relative", overflow: "hidden" }}>
             <div className="absolute top-3 right-3">
@@ -214,7 +214,7 @@ export default function DnaPage() {
       {activeTab === "Overview" && (
         <>
           {/* 3-column main grid */}
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Trader Archetype + radar */}
             <div className="card">
               <div className="section-label mb-3">Trader Archetype</div>
@@ -368,7 +368,7 @@ export default function DnaPage() {
           </div>
 
           {/* Best + Worst Setups */}
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <span className="section-label" style={{ color: "var(--color-bull)" }}>Best Performing Setups</span>
@@ -387,7 +387,7 @@ export default function DnaPage() {
           </div>
 
           {/* DNA Evolution + Next Goal */}
-          <div className="grid gap-4" style={{ gridTemplateColumns: "3fr 1fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-[3fr_1fr] gap-4">
             <div className="card">
               <div className="section-label mb-4">Trading DNA Evolution</div>
               <ResponsiveContainer width="100%" height={100}>
@@ -481,10 +481,11 @@ export default function DnaPage() {
             )}
           </div>
 
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="card">
               <div className="section-label mb-3">Performance by Day of Week</div>
               {dayRows.length > 0 ? (
+                <div className="overflow-x-auto">
                 <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -504,6 +505,7 @@ export default function DnaPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               ) : (
                 <EmptyState text="No day-of-week data yet." />
               )}
@@ -537,7 +539,7 @@ export default function DnaPage() {
         <div className="card">
           <div className="section-label mb-3">Performance by Trading Session (IST)</div>
           {sessionRows.length > 0 ? (
-            <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${sessionRows.length}, 1fr)` }}>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {sessionRows.map((r) => (
                 <div key={r.session} className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
                   <div className="font-semibold mb-2" style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>{r.session}</div>
@@ -559,6 +561,7 @@ export default function DnaPage() {
         <div className="card">
           <div className="section-label mb-3">Performance by Instrument</div>
           {instrumentRows.length > 0 ? (
+            <div className="overflow-x-auto">
             <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -579,6 +582,7 @@ export default function DnaPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <EmptyState text="Per-instrument breakdown will appear once trades across multiple instruments are imported." />
           )}
@@ -587,7 +591,7 @@ export default function DnaPage() {
 
       {activeTab === "Edge Profile" && (
         <div className="flex flex-col gap-4">
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 2fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-4">
             <div className="card">
               <div className="section-label mb-3">Edge Distribution</div>
               <div className="flex flex-col items-center gap-3">
@@ -612,7 +616,7 @@ export default function DnaPage() {
 
             <div className="card">
               <div className="section-label mb-3">Edge Quality</div>
-              <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 {[
                   { k: "Win Rate", v: `${winRate > 0 ? winRate.toFixed(0) : 58}%` },
                   { k: "Expectancy", v: "+0.34R" },
@@ -647,7 +651,7 @@ export default function DnaPage() {
             </div>
           </div>
 
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <span className="section-label" style={{ color: "var(--color-bull)" }}>Best Performing Setups</span>
@@ -668,7 +672,7 @@ export default function DnaPage() {
       )}
 
       {activeTab === "Risk DNA" && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="card">
             <div className="section-label mb-3">Discipline Breakdown</div>
             <div className="flex flex-col gap-3">
@@ -725,18 +729,19 @@ function EmptyState({ text }: { text: string }) {
 function SetupTable({ rows, positive }: { rows: { setup: string; winRate: number; expectancy: number; pf: number; trades: number }[]; positive: boolean }) {
   const color = positive ? "var(--color-bull)" : "var(--color-bear)";
   return (
+    <div className="overflow-x-auto">
     <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
       <thead>
         <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
           {["Setup","Win Rate","Expectancy","P.Factor","Trades"].map((h) => (
-            <th key={h} className="pb-2 text-left font-semibold pr-3" style={{ color: "var(--text-secondary)" }}>{h}</th>
+            <th key={h} className="pb-2 text-left font-semibold pr-3 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>
           ))}
         </tr>
       </thead>
       <tbody>
         {rows.map((s) => (
           <tr key={s.setup} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-            <td className="py-2 pr-3 font-semibold" style={{ color: "var(--text-primary)", borderLeft: `3px solid ${color}`, paddingLeft: 8 }}>{s.setup}</td>
+            <td className="py-2 pr-3 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)", borderLeft: `3px solid ${color}`, paddingLeft: 8 }}>{s.setup}</td>
             <td className="py-2 pr-3 font-mono font-bold" style={{ color }}>{s.winRate}%</td>
             <td className="py-2 pr-3 font-mono font-bold" style={{ color }}>{s.expectancy >= 0 ? "+" : ""}{s.expectancy.toFixed(2)}%</td>
             <td className="py-2 pr-3 font-mono" style={{ color: "var(--text-primary)" }}>{s.pf.toFixed(1)}</td>
@@ -745,5 +750,6 @@ function SetupTable({ rows, positive }: { rows: { setup: string; winRate: number
         ))}
       </tbody>
     </table>
+    </div>
   );
 }

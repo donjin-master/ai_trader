@@ -196,18 +196,18 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-col gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg"
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
             style={{ background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.25)" }}>
             <Settings2 size={18} style={{ color: "var(--accent-primary)" }} />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>SETTINGS</h1>
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Manage your account, preferences, and system configurations</p>
+            <p className="hidden sm:block" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Manage your account, preferences, and system configurations</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {toast && (
             <span className="rounded-full px-3 py-1 font-semibold"
               style={{ background: "rgba(38,208,124,0.15)", border: "1px solid rgba(38,208,124,0.3)", color: "var(--color-bull)", fontSize: "var(--text-xs)" }}>
@@ -215,7 +215,7 @@ export default function SettingsPage() {
             </span>
           )}
           <button type="button" className="btn-primary flex items-center gap-1.5" onClick={() => showToast("Changes saved!")}>
-            <Save size={13} /> Save Changes
+            <Save size={13} /> <span className="hidden sm:inline">Save Changes</span>
           </button>
         </div>
       </div>
@@ -229,7 +229,7 @@ export default function SettingsPage() {
 
       {/* Profile Tab */}
       {activeTab === "Profile" && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
           {/* Profile Information */}
           <div className="card">
             <div className="section-label mb-3">Profile Information</div>
@@ -276,7 +276,7 @@ export default function SettingsPage() {
           <div className="card">
             <div className="section-label mb-3">Trading Preferences</div>
             <div className="flex flex-col gap-3">
-              <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                 <div>
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>Default Market</div>
                   <Select value="Crypto" onChange={() => {}} options={["Crypto", "Stocks", "Forex"]} />
@@ -286,7 +286,7 @@ export default function SettingsPage() {
                   <Select value="Binance" onChange={() => {}} options={["Binance", "Bybit", "Delta"]} />
                 </div>
               </div>
-              <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                 <div>
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>Default Pair</div>
                   <Select value="BTC/USDT" onChange={() => {}} options={["BTC/USDT", "ETH/USDT", "SOL/USDT"]} />
@@ -296,7 +296,7 @@ export default function SettingsPage() {
                   <Select value="Asia/Kolkata (UTC +5:30)" onChange={() => {}} options={["Asia/Kolkata (UTC +5:30)", "UTC", "US/Eastern"]} />
                 </div>
               </div>
-              <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
                 <div>
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>Default TF</div>
                   <Select value="4H" onChange={() => {}} options={["15m", "1H", "4H", "1D"]} />
@@ -319,7 +319,7 @@ export default function SettingsPage() {
                 <div className="section-label mb-3">Risk Management</div>
                 {profile && (
                   <div className="flex flex-col gap-3">
-                    <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                    <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
                       <div>
                         <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>Risk per Trade</div>
                         <NumberInput value={profile.risk_per_trade_pct} onChange={(v) => save({ risk_per_trade_pct: v })} suffix="%" min={0.1} max={5} />
@@ -333,7 +333,7 @@ export default function SettingsPage() {
                         <NumberInput value={10} onChange={() => {}} suffix="%" />
                       </div>
                     </div>
-                    <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                    <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
                       <div>
                         <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>Max Positions</div>
                         <NumberInput value={profile.max_concurrent_trades} onChange={(v) => save({ max_concurrent_trades: v })} min={1} max={10} />
@@ -358,7 +358,7 @@ export default function SettingsPage() {
             <div className="card">
               <div className="section-label mb-3">AI Preferences</div>
               <div className="section-label mb-2" style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>AI Model Preferences</div>
-              <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div className="grid gap-3 mb-3 grid-cols-1 sm:grid-cols-2">
                 <div>
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>Primary Model</div>
                   <Select value={primaryModel} onChange={setPrimaryModel} options={["Gemini 2.5 Pro", "GPT-4o", "Claude 3.5 Opus"]} />
@@ -418,7 +418,7 @@ export default function SettingsPage() {
 
       {/* Notifications Tab */}
       {activeTab === "Notifications" && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           <div className="card">
             <div className="section-label mb-3">Notification Preferences</div>
             <div className="flex flex-col gap-3">
@@ -459,7 +459,7 @@ export default function SettingsPage() {
 
       {/* Integrations Tab */}
       {activeTab === "Integrations" && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           <div className="card">
             <div className="section-label mb-3">Integrations</div>
             <div className="flex flex-col gap-2">
@@ -527,7 +527,7 @@ export default function SettingsPage() {
 
       {/* Trading Tab — uses real risk profile */}
       {activeTab === "Trading" && profile && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           <div className="card">
             <div className="section-label mb-3">Execution Mode</div>
             <div className="flex flex-col gap-2">
@@ -644,10 +644,10 @@ export default function SettingsPage() {
 
       {/* AI Preferences standalone tab */}
       {activeTab === "AI Preferences" && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           <div className="card">
             <div className="section-label mb-3">AI Model Preferences</div>
-            <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="grid gap-3 mb-4 grid-cols-1 sm:grid-cols-2">
               <div>
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>Primary Model</div>
                 <Select value={primaryModel} onChange={setPrimaryModel} options={["Gemini 2.5 Pro", "GPT-4o", "Claude 3.5 Opus"]} />
