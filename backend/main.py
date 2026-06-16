@@ -2108,7 +2108,7 @@ async def get_pattern_stats() -> list[dict]:
                 SELECT pattern_type,
                        COUNT(*) AS total_trades,
                        ROUND(AVG(CASE WHEN outcome='win' THEN 1.0 ELSE 0.0 END) * 100, 1) AS win_rate,
-                       ROUND(AVG(pnl_pct), 2) AS avg_pnl_pct,
+                       COALESCE(ROUND(AVG(pnl_pct), 2), 0) AS avg_pnl_pct,
                        ROUND(AVG(boardroom_confidence), 1) AS avg_confidence
                 FROM pattern_outcomes
                 GROUP BY pattern_type

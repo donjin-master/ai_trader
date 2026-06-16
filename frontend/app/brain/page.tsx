@@ -309,12 +309,12 @@ export default function BrainPage() {
     .filter((p) => p.win_rate >= 50 && p.avg_pnl_pct > 0)
     .sort((a, b) => b.avg_pnl_pct - a.avg_pnl_pct)
     .slice(0, 5)
-    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: p.avg_pnl_pct }));
+    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: Number(p.avg_pnl_pct ?? 0) }));
   const losePatterns = patternStats
     .filter((p) => p.win_rate < 50 || p.avg_pnl_pct < 0)
     .sort((a, b) => a.avg_pnl_pct - b.avg_pnl_pct)
     .slice(0, 5)
-    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: p.avg_pnl_pct }));
+    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: Number(p.avg_pnl_pct ?? 0) }));
 
   const computedRules = sortedLessons.filter(l => (l.quality_score ?? 0) >= 4).slice(0, 5).map(l => ({
     title: l.lesson_text ?? "Unnamed Rule",
