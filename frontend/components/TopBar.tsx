@@ -39,21 +39,21 @@ export default function TopBar() {
         borderBottom: "1px solid var(--border-subtle)",
         zIndex: 40,
       }}
-      className="fixed inset-x-0 top-0 flex items-center px-4 gap-4"
+      className="fixed inset-x-0 top-0 flex items-center px-2 sm:px-4 gap-2 sm:gap-4"
     >
       {/* Logo */}
-      <div className="flex items-center gap-2 shrink-0" style={{ width: "calc(var(--sidebar-width) - 16px)" }}>
+      <div className="flex items-center gap-2 shrink-0 md:w-[calc(var(--sidebar-width)-16px)]">
         <div className="flex items-center gap-1.5 rounded-lg px-2 py-1 font-bold text-white"
           style={{ background: "var(--accent-primary)", fontSize: "var(--text-sm)" }}>
           AI
         </div>
-        <div>
+        <div className="hidden sm:block">
           <div className="font-bold" style={{ fontSize: "var(--text-md)", color: "var(--text-primary)", lineHeight: 1.1 }}>TRADER</div>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", lineHeight: 1 }}>v1.0.0</div>
         </div>
       </div>
 
-      <div className="h-6 w-px" style={{ background: "var(--border-default)" }} />
+      <div className="hidden sm:block h-6 w-px" style={{ background: "var(--border-default)" }} />
 
       {/* Pair selector */}
       <div className="relative" ref={pairMenuRef}>
@@ -93,8 +93,8 @@ export default function TopBar() {
       </div>
 
       {/* Price + change */}
-      <div className="flex items-baseline gap-2">
-        <span className="font-mono font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>
+      <div className="flex items-baseline gap-2 min-w-0">
+        <span className="font-mono font-bold truncate" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>
           {price > 0 ? price.toLocaleString("en-US", { minimumFractionDigits: 1 }) : "—"}
         </span>
         {price > 0 && (
@@ -104,7 +104,7 @@ export default function TopBar() {
         )}
       </div>
 
-      <div className="h-6 w-px" style={{ background: "var(--border-default)" }} />
+      <div className="hidden sm:block h-6 w-px" style={{ background: "var(--border-default)" }} />
 
       {/* Stats strip */}
       <div className="hidden md:flex items-center gap-5 flex-1 overflow-hidden">
@@ -131,9 +131,9 @@ export default function TopBar() {
       {/* Right actions */}
       <div className="ml-auto flex items-center gap-2 shrink-0">
         <button type="button" onClick={() => setShowQuickTrade(true)}
-          className="flex items-center gap-1.5 rounded-full px-4 py-1.5 font-semibold text-white transition-all hover:opacity-90"
+          className="flex items-center gap-1.5 rounded-full px-3 sm:px-4 py-1.5 font-semibold text-white transition-all hover:opacity-90"
           style={{ background: "var(--accent-primary)", fontSize: "var(--text-sm)" }}>
-          <Zap size={14} /> Quick Trade
+          <Zap size={14} /> <span className="hidden sm:inline">Quick Trade</span>
         </button>
         <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
           style={{ border: "1px solid var(--border-default)", color: "var(--text-secondary)" }}>
