@@ -6,7 +6,7 @@ import {
   PieChart, Pie, Cell,
 } from "recharts";
 import { Info, Shield } from "lucide-react";
-import { api, type Snapshot, type Status, type Watching, type Position, type ManagedPositionState, type KeyLevels } from "@/lib/api";
+import { api, API_HEADERS, type Snapshot, type Status, type Watching, type Position, type ManagedPositionState, type KeyLevels } from "@/lib/api";
 import { mockData } from "@/lib/mockData";
 import TVChart from "@/components/TVChart";
 
@@ -106,7 +106,10 @@ export default function DashboardPage() {
     setClosing(true);
     setCloseError(null);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/close/${instrument}`, { method: "POST" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/close/${instrument}`, {
+        method: "POST",
+        headers: API_HEADERS,
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || data.error || `Failed (${res.status})`);
       // Refresh positions & managed positions

@@ -12,7 +12,7 @@ import {
   BookOpen, Filter, Plus, Tag, FileText, ChevronDown, X, Check,
   Search, Brain, Zap, Clock, TrendingUp, TrendingDown, Minus,
 } from "lucide-react";
-import { api, type Trade, type Lesson, type Watching } from "@/lib/api";
+import { api, API_HEADERS, type Trade, type Lesson, type Watching } from "@/lib/api";
 import { mockData } from "@/lib/mockData";
 
 const POLL    = { refreshInterval: 30_000 };
@@ -584,7 +584,7 @@ function NewEntryModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     };
     try {
       const res = await fetch(`${API_URL}/api/trades/manual`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "POST", headers: { "Content-Type": "application/json", ...API_HEADERS }, body: JSON.stringify(body),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));

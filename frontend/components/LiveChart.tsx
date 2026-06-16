@@ -33,7 +33,7 @@ import {
 } from "lightweight-charts-drawing";
 import type { Anchor } from "lightweight-charts-drawing";
 import useSWR from "swr";
-import { API_BASE, WS_BASE, api, type Candle, type ManagedPositionState, type Snapshot } from "@/lib/api";
+import { API_BASE, API_HEADERS, WS_BASE, api, type Candle, type ManagedPositionState, type Snapshot } from "@/lib/api";
 import { ema, sma, rsi, bollinger, atr, vwap, macd } from "@/lib/indicators";
 import { cn, formatPct, formatUsd } from "@/lib/utils";
 
@@ -335,7 +335,7 @@ export default function LiveChart({
     if (mode !== "interactive" || replayMode) return;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/key-levels/${instrument}`);
+        const res = await fetch(`${API_BASE}/api/key-levels/${instrument}`, { headers: API_HEADERS });
         if (res.ok) {
           const data = await res.json();
           setKeyLevels(data.chart_levels || []);
@@ -537,6 +537,7 @@ export default function LiveChart({
       try {
         await fetch(`${API_BASE}/api/drawings/${instrument}/${timeframe}/all`, {
           method: "DELETE",
+          headers: API_HEADERS,
         });
       } catch (err) {
         console.error("Failed to clear drawings:", err);
@@ -568,7 +569,7 @@ export default function LiveChart({
     if (dbId) {
       fetch(`${API_BASE}/api/drawings/${dbId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...API_HEADERS },
         body: JSON.stringify({
           style: drawing.style,
           locked: drawing.options?.locked || false,
@@ -603,7 +604,7 @@ export default function LiveChart({
       try {
         const res = await fetch(`${API_BASE}/api/drawings/${instrument}/${timeframe}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...API_HEADERS },
           body: JSON.stringify(payload),
         });
         if (res.ok) {
@@ -630,7 +631,7 @@ export default function LiveChart({
       try {
         await fetch(`${API_BASE}/api/drawings/${dbId}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...API_HEADERS },
           body: JSON.stringify(payload),
         });
       } catch (err) {
@@ -647,6 +648,7 @@ export default function LiveChart({
       try {
         await fetch(`${API_BASE}/api/drawings/${dbId}`, {
           method: "DELETE",
+          headers: API_HEADERS,
         });
         delete drawingIdMapRef.current[drawing.id];
       } catch (err) {
@@ -671,7 +673,7 @@ export default function LiveChart({
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/drawings/${instrument}/${timeframe}`);
+        const res = await fetch(`${API_BASE}/api/drawings/${instrument}/${timeframe}`, { headers: API_HEADERS });
         if (!res.ok) return;
         const savedDrawings = await res.json();
         for (const d of savedDrawings) {
@@ -1169,7 +1171,7 @@ export default function LiveChart({
     try {
       const res = await fetch(`${API_BASE}/api/replay/analyse`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...API_HEADERS },
         body: JSON.stringify({ candles: currentCandles, instrument }),
       });
       if (res.ok) setReplayAnalysis(await res.json());

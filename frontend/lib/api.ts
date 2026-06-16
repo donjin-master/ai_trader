@@ -2,6 +2,7 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export const API_BASE = BASE;
 export const WS_BASE = BASE.replace(/^http/, "ws");
+export const API_HEADERS = { "x-api-secret": process.env.NEXT_PUBLIC_FRONTEND_API_SECRET || "" };
 
 export interface Candle {
   time: number;

@@ -91,7 +91,10 @@ export function ManualTradePanel({
   const { data: account, isLoading: accountLoading, error: accountError } = useQuery<AccountSummary>({
     queryKey: ["account-summary"],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/account/summary`, { cache: "no-store" });
+      const res = await fetch(`${API_BASE}/api/account/summary`, {
+        cache: "no-store",
+        headers: { "x-api-secret": process.env.NEXT_PUBLIC_FRONTEND_API_SECRET || "" },
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.detail || data.error || "Account summary unavailable");
@@ -104,7 +107,10 @@ export function ManualTradePanel({
   const { data: instrumentDetails } = useQuery<InstrumentDetails>({
     queryKey: ["instrument-details", form.instrument],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/instruments/${form.instrument}/details`, { cache: "no-store" });
+      const res = await fetch(`${API_BASE}/api/instruments/${form.instrument}/details`, {
+        cache: "no-store",
+        headers: { "x-api-secret": process.env.NEXT_PUBLIC_FRONTEND_API_SECRET || "" },
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.detail || data.error || "Instrument details unavailable");
@@ -161,7 +167,10 @@ export function ManualTradePanel({
       setError(null);
       const res = await fetch(`${API_BASE}/api/trades/manual`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-secret": process.env.NEXT_PUBLIC_FRONTEND_API_SECRET || "",
+        },
         body: JSON.stringify({
           instrument: form.instrument,
           direction: form.direction,
