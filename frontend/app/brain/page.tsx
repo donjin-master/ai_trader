@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR from "swr";
 import {
   Brain, RefreshCw, Download, CheckCircle, ChevronDown, ChevronUp,
@@ -296,10 +296,14 @@ export default function BrainPage() {
     POLL_DX,
   );
 
-  const realLessons     = lessons ?? [];
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const realLessons     = mounted ? (lessons ?? []) : [];
   const sortedLessons   = [...realLessons].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
-  const patternStats    = rawPatternStats ?? [];
-  const decisionFeed    = decisions ?? [];
+  const patternStats    = mounted ? (rawPatternStats ?? []) : [];
+  const decisionFeed    = mounted ? (decisions ?? []) : [];
+  const safeTrades      = mounted ? (trades ?? []) : [];
 
   const winPatterns = patternStats
     .filter((p) => p.win_rate >= 50 && p.avg_pnl_pct > 0)
@@ -320,7 +324,7 @@ export default function BrainPage() {
     improvement: l.confidence_score ?? 0,
   }));
 
-  const totalTrades = (trades ?? []).length;
+  const totalTrades = safeTrades.length;
   const goodLessons = realLessons.filter((l) => (l.quality_score ?? 0) >= 3).length;
   const avgQual = realLessons.length
     ? realLessons.reduce((s, l) => s + (l.quality_score ?? 0), 0) / realLessons.length
@@ -651,9 +655,9 @@ export default function BrainPage() {
                 </tr>
               </thead>
               <tbody>
-                {trades && trades.length > 0 ? (
+                {safeTrades.length > 0 ? (
                   (() => {
-                    const cfs = (trades as Trade[]).filter((t) => t.counterfactuals?.scenarios).flatMap((t) => t.counterfactuals!.scenarios!);
+                    const cfs = safeTrades.filter((t) => t.counterfactuals?.scenarios).flatMap((t) => t.counterfactuals!.scenarios!);
                     return cfs.slice(0, 5).map((cf, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                         <td className="py-2 pr-3 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{cf.name}</td>
