@@ -131,6 +131,9 @@ class MarketSnapshot:
             fear_greed = await self._fetch_fear_greed()
             dominance = await self._fetch_btc_dominance()
 
+        ticker = ticker or {}
+        orderbook = orderbook or {}
+
         price = _to_float(ticker.get("close") or ticker.get("spot_price"))
         open_24h = _to_float(ticker.get("open"))
         change_24h_pct: float | None = None

@@ -48,8 +48,8 @@ function PositionCard({ pos }: { pos: OptionsPosition }) {
   return (
     <div className="border border-zinc-800 rounded-xl p-4 bg-zinc-900/50 space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-white font-semibold font-mono">{pos.symbol}</span>
           <span
             className={`text-xs font-bold px-2 py-0.5 rounded-full ${

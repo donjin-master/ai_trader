@@ -64,7 +64,7 @@ export default function SideNav() {
         background: "var(--bg-surface)",
         borderRight: "1px solid var(--border-subtle)",
       }}
-      className="fixed bottom-0 left-0 z-30 flex flex-col overflow-y-auto"
+      className="hidden md:flex fixed bottom-0 left-0 z-30 flex-col overflow-y-auto"
     >
       <div className="flex flex-col gap-1 px-2 pt-3 flex-1">
         {items.map(({ href, label, icon: Icon }) => {

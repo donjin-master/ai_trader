@@ -286,18 +286,18 @@ export default function LabPage() {
   return (
     <div className="flex flex-col gap-4" suppressHydrationWarning>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg"
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
             style={{ background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.25)" }}>
             <FlaskConical size={18} style={{ color: "var(--accent-primary)" }} />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>SCENARIO LAB</h1>
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Research, backtest, and stress-test your trading edge on real data</p>
+            <p className="hidden sm:block" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Research, backtest, and stress-test your trading edge on real data</p>
           </div>
         </div>
-        <button type="button" className="btn-ghost flex items-center gap-1.5" onClick={handleExport}><Download size={12} /> Export Results</button>
+        <button type="button" className="btn-ghost flex items-center gap-1.5 shrink-0" onClick={handleExport}><Download size={12} /> <span className="hidden sm:inline">Export Results</span></button>
       </div>
 
       {/* Tab bar */}
@@ -308,7 +308,7 @@ export default function LabPage() {
       </div>
 
       {activeTab === "Scenarios" && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "3fr 2fr" }}>
+        <div className="grid grid-cols-1 md:grid-cols-[3fr_2fr] gap-4">
           <div className="card">
             <div className="section-label mb-3">SMC Pattern Performance (real trade history)</div>
             {patternStats.length === 0 ? (
@@ -413,7 +413,7 @@ export default function LabPage() {
             {ruleError && <ErrorBox message={ruleError} />}
             {ruleResult && !ruleError && (
               <div className="flex flex-col gap-3 mt-2">
-                <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
                     <div className="section-label mb-2">Without Rule</div>
                     <StatGrid items={[
@@ -466,7 +466,7 @@ export default function LabPage() {
             {smcResult && !smcError && (
               <div className="flex flex-col gap-3 mt-2">
                 {smcResult.train_stats && smcResult.test_stats ? (
-                  <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
                       <div className="section-label mb-2">Train</div>
                       <StatGrid items={statsRow(smcResult.train_stats)} />
@@ -605,12 +605,13 @@ export default function LabPage() {
                   { label: "Total R", value: `${repResult.total_r >= 0 ? "+" : ""}${repResult.total_r}R`, color: repResult.total_r >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
                 ]} />
                 {repResult.decisions.length > 0 && (
+                  <div className="overflow-x-auto">
                   <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
-                    <thead><tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>{["Time", "Direction", "Score", "Outcome", "R"].map((h) => <th key={h} className="pb-2 text-left font-semibold pr-4" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr></thead>
+                    <thead><tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>{["Time", "Direction", "Score", "Outcome", "R"].map((h) => <th key={h} className="pb-2 text-left font-semibold pr-4 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr></thead>
                     <tbody>
                       {repResult.decisions.slice(0, 30).map((d, i) => (
                         <tr key={i} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                          <td className="py-1.5 pr-4 font-mono" style={{ color: "var(--text-muted)" }}>{d.time}</td>
+                          <td className="py-1.5 pr-4 font-mono whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{d.time}</td>
                           <td className="py-1.5 pr-4 font-bold" style={{ color: d.direction === "long" ? "var(--color-bull)" : "var(--color-bear)" }}>{d.direction.toUpperCase()}</td>
                           <td className="py-1.5 pr-4 font-mono">{d.score}/10</td>
                           <td className="py-1.5 pr-4">{d.outcome ?? "—"}</td>
@@ -619,6 +620,7 @@ export default function LabPage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             )}

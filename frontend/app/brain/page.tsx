@@ -195,7 +195,7 @@ function DecisionCard({ d }: { d: Trade }) {
 
           {/* Bull vs Bear */}
           {(d.bull_case || d.bear_case) && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {d.bull_case && (
                 <div className="rounded-lg p-3.5" style={{ background: "rgba(38,208,124,0.06)", border: "1px solid rgba(38,208,124,0.2)" }}>
                   <div className="font-bold mb-1.5" style={{ fontSize: "var(--text-xs)", letterSpacing: "0.06em", color: "var(--color-bull)" }}>▲ BULL CASE</div>
@@ -309,12 +309,12 @@ export default function BrainPage() {
     .filter((p) => p.win_rate >= 50 && p.avg_pnl_pct > 0)
     .sort((a, b) => b.avg_pnl_pct - a.avg_pnl_pct)
     .slice(0, 5)
-    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: p.avg_pnl_pct }));
+    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: Number(p.avg_pnl_pct ?? 0) }));
   const losePatterns = patternStats
     .filter((p) => p.win_rate < 50 || p.avg_pnl_pct < 0)
     .sort((a, b) => a.avg_pnl_pct - b.avg_pnl_pct)
     .slice(0, 5)
-    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: p.avg_pnl_pct }));
+    .map((p, i) => ({ rank: i + 1, pattern: p.pattern_type, winRate: Math.round(p.win_rate), trades: p.total_trades, expectancy: Number(p.avg_pnl_pct ?? 0) }));
 
   const computedRules = sortedLessons.filter(l => (l.quality_score ?? 0) >= 4).slice(0, 5).map(l => ({
     title: l.lesson_text ?? "Unnamed Rule",
@@ -378,26 +378,26 @@ export default function BrainPage() {
   return (
     <div className="flex flex-col gap-4" suppressHydrationWarning>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg"
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
             style={{ background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.25)" }}>
             <Brain size={18} style={{ color: "var(--accent-primary)" }} />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>AI BRAIN</h1>
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Every decision the AI made, and what it learned</p>
+            <p className="hidden sm:block" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Every decision the AI made, and what it learned</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button type="button" onClick={handleRefresh} disabled={refreshing}
             className="btn-ghost flex items-center gap-1.5"
             style={{ opacity: refreshing ? 0.7 : 1, cursor: refreshing ? "default" : "pointer" }}>
             <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
-            {refreshing ? "Refreshing…" : "Refresh"}
+            <span className="hidden sm:inline">{refreshing ? "Refreshing…" : "Refresh"}</span>
           </button>
           <button type="button" onClick={handleExport} className="btn-ghost flex items-center gap-1.5">
-            <Download size={12} /> Export
+            <Download size={12} /> <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </div>
@@ -421,7 +421,7 @@ export default function BrainPage() {
       {activeTab === "Decisions" && (
         <div className="flex flex-col gap-4">
           {/* Mini stats strip */}
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
             {[
               { label: "Total Cycles",  value: totalDecisions,                  color: "var(--text-primary)" },
               { label: "Traded",        value: tradedCount,                     color: "var(--color-bull)" },
@@ -468,8 +468,8 @@ export default function BrainPage() {
       {(activeTab === "Learnings" || activeTab === "All") && (
         <div className="flex flex-col gap-4">
           {/* Top 3 insight cards + brain confidence */}
-          <div className="flex gap-4">
-            <div className="flex gap-4 flex-1">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex flex-col sm:flex-row gap-4 flex-1">
               {(topInsights ? topInsights.map((l, i) => ({
                 n: i + 1,
                 color: i === 1 ? "var(--color-bear)" : "var(--color-bull)",
@@ -497,7 +497,7 @@ export default function BrainPage() {
                 </div>
               ))}
             </div>
-            <div className="card shrink-0" style={{ width: 200 }}>
+            <div className="card w-full md:w-[200px] md:shrink-0">
               <div className="section-label mb-2">Brain Confidence Score</div>
               <div className="font-mono font-bold" style={{ fontSize: "var(--text-hero)", color: "var(--text-primary)", lineHeight: 1 }}>{brainConf}</div>
               <div style={{ fontSize: "var(--text-md)", color: "var(--text-secondary)", fontWeight: 400 }}>/ 100</div>
@@ -540,11 +540,12 @@ export default function BrainPage() {
 
       {/* ── PATTERNS TAB ──────────────────────────────────────────────── */}
       {(activeTab === "Patterns" || activeTab === "All") && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="card">
             <div className="flex items-center justify-between mb-3">
               <span className="section-label" style={{ color: "var(--color-bull)" }}>Top Winning Patterns</span>
             </div>
+            <div className="overflow-x-auto">
             <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -567,11 +568,13 @@ export default function BrainPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
           <div className="card">
             <div className="flex items-center justify-between mb-3">
               <span className="section-label" style={{ color: "var(--color-bear)" }}>Top Losing Patterns</span>
             </div>
+            <div className="overflow-x-auto">
             <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -594,6 +597,7 @@ export default function BrainPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

@@ -103,33 +103,33 @@ export default function PerformancePage() {
   return (
     <div className="flex flex-col gap-4" suppressHydrationWarning>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg"
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
             style={{ background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.25)" }}>
             <TrendingUp size={18} style={{ color: "var(--accent-primary)" }} />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>PERFORMANCE</h1>
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Deep analytics on your trading performance</p>
+            <p className="hidden sm:block" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Deep analytics on your trading performance</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 rounded-lg p-1 overflow-x-auto" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
             {PERIODS.map((p) => (
               <button key={p} type="button" onClick={() => setPeriod(p)}
-                className="rounded-md px-3 py-1.5 font-semibold transition-all"
+                className="rounded-md px-3 py-1.5 font-semibold transition-all shrink-0"
                 style={{ fontSize: "var(--text-xs)", background: period === p ? "var(--accent-primary)" : "transparent", color: period === p ? "#fff" : "var(--text-secondary)" }}>
                 {p}
               </button>
             ))}
           </div>
-          <button type="button" className="btn-ghost flex items-center gap-1.5"><Download size={12} /> Export Report</button>
+          <button type="button" className="btn-ghost flex items-center gap-1.5"><Download size={12} /> <span className="hidden sm:inline">Export Report</span></button>
         </div>
       </div>
 
       {/* Stats strip */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
         {[
           { label: "Total P&L",      value: pnlStr,                sub: "-14.1% max dd",  color: pnlColor },
           { label: "Win Rate",       value: `${winRate.toFixed(1)}%`, sub: "11L / 14W",   color: winRate >= 50 ? "var(--color-bull)" : "var(--color-bear)" },
@@ -147,7 +147,7 @@ export default function PerformancePage() {
       </div>
 
       {/* Equity curve + stats block + AI Edge Score */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "3fr 1fr 1fr" }}>
+      <div className="grid grid-cols-1 md:grid-cols-[3fr_1fr_1fr] gap-4">
         {/* Equity curve */}
         <div className="card">
           <div className="flex items-center justify-between mb-3">
@@ -221,7 +221,7 @@ export default function PerformancePage() {
       </div>
 
       {/* Trade Distribution + Risk Metrics + Monthly P&L */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Trade Distribution */}
         <div className="card">
           <div className="section-label mb-3">Trade Distribution</div>
@@ -251,6 +251,7 @@ export default function PerformancePage() {
         {/* Risk Metrics */}
         <div className="card">
           <div className="section-label mb-3">Risk Metrics</div>
+          <div className="overflow-x-auto">
           <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
             <tbody>
               {dynamicRiskRows.map((r) => (
@@ -261,6 +262,7 @@ export default function PerformancePage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Monthly P&L */}
@@ -284,7 +286,7 @@ export default function PerformancePage() {
       </div>
 
       {/* Performance Insights strip */}
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3">
         {dynamicInsights.map((ins, i) => (
           <div key={i} className="flex-1 rounded-xl p-4" style={{ background: ins.bg, border: `1px solid ${ins.color}30` }}>
             <div className="flex items-center gap-2 mb-2">

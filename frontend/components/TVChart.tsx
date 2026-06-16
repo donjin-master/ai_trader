@@ -35,7 +35,8 @@ export default function TVChart({
   return (
     <div
       ref={wrapperRef}
-      style={{ position: "relative", height, width: "100%", borderRadius: 12, overflow: "hidden" }}
+      className="relative w-full overflow-hidden h-[280px] md:h-[var(--chart-h)]"
+      style={{ "--chart-h": `${height}px`, borderRadius: 12 } as React.CSSProperties}
     >
       <AdvancedRealTimeChart
         symbol={symbol}

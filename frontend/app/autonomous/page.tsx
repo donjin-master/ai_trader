@@ -222,18 +222,18 @@ export default function AutonomousPage() {
   return (
     <div className="flex flex-col gap-4" suppressHydrationWarning>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg"
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
             style={{ background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.25)" }}>
             <Bot size={18} style={{ color: "var(--accent-primary)" }} />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-bold" style={{ fontSize: "var(--text-2xl)", color: "var(--text-primary)" }}>AUTONOMOUS TRADING</h1>
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>AI-driven execution engine — live system control</p>
+            <p className="hidden sm:block" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>AI-driven execution engine — live system control</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2 rounded-full px-3 py-1"
             style={{ background: killSwitch ? "rgba(255,77,106,0.1)" : "rgba(38,208,124,0.1)", border: `1px solid ${killSwitch ? "rgba(255,77,106,0.3)" : "rgba(38,208,124,0.3)"}` }}>
             <div className="h-2 w-2 rounded-full animate-pulse" style={{ background: killSwitch ? "var(--color-bear)" : "var(--color-bull)" }} />
@@ -241,13 +241,13 @@ export default function AutonomousPage() {
               {killSwitch ? "System Halted" : "System Active"}
             </span>
           </div>
-          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Mode: {mode}</span>
+          <span className="hidden sm:inline" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Mode: {mode}</span>
           <button type="button" className="btn-ghost flex items-center gap-1.5" style={{ fontSize: "var(--text-xs)" }}
             disabled={settingMode} onClick={() => handleModeChange("ADVISORY")}>
-            <Pause size={12} /> Pause System
+            <Pause size={12} /> <span className="hidden sm:inline">Pause System</span>
           </button>
           <button type="button" className="btn-ghost flex items-center gap-1.5" style={{ fontSize: "var(--text-xs)" }} onClick={handleExportLogs}>
-            <Download size={12} /> Export Logs
+            <Download size={12} /> <span className="hidden sm:inline">Export Logs</span>
           </button>
           <Link href="/settings" className="btn-ghost" style={{ padding: "6px 8px" }}>
             <Settings size={14} style={{ color: "var(--text-secondary)" }} />
@@ -265,7 +265,7 @@ export default function AutonomousPage() {
       {activeTab === "Overview" && (
         <>
           {/* Stats strip */}
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             {statTiles.map((s) => (
               <div key={s.label} className="card" style={{ padding: "var(--space-3)" }}>
                 <div className="section-label mb-1">{s.label}</div>
@@ -275,7 +275,7 @@ export default function AutonomousPage() {
           </div>
 
           {/* Main grid */}
-          <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr 1fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr] gap-4">
             {/* Autonomous Performance chart */}
             <div className="card">
               <div className="flex items-center justify-between mb-3">
@@ -380,7 +380,7 @@ export default function AutonomousPage() {
           </div>
 
           {/* Bottom row */}
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Risk Management */}
             <div className="card">
               <div className="section-label mb-3">Risk Management</div>
@@ -482,11 +482,12 @@ export default function AutonomousPage() {
             {(positions ?? []).length === 0 ? (
               <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>No open positions.</p>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                     {["Pair","Side","Size","Entry","Mark","Unrealized P&L","SL","TP1"].map((h) => (
-                      <th key={h} className="pb-2 text-left font-semibold pr-4" style={{ color: "var(--text-secondary)" }}>{h}</th>
+                      <th key={h} className="pb-2 text-left font-semibold pr-4 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -496,7 +497,7 @@ export default function AutonomousPage() {
                     const pnl = parseFloat(p.unrealized_pnl ?? "0");
                     return (
                       <tr key={p.product_symbol} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                        <td className="py-2 pr-4 font-semibold" style={{ color: "var(--text-primary)" }}>{p.product_symbol}</td>
+                        <td className="py-2 pr-4 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{p.product_symbol}</td>
                         <td className="py-2 pr-4 font-bold" style={{ color: p.size > 0 ? "var(--color-bull)" : "var(--color-bear)" }}>{p.size > 0 ? "LONG" : "SHORT"}</td>
                         <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-primary)" }}>{Math.abs(p.size)}</td>
                         <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-primary)" }}>{parseFloat(p.entry_price).toLocaleString()}</td>
@@ -509,6 +510,7 @@ export default function AutonomousPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
 
@@ -519,18 +521,19 @@ export default function AutonomousPage() {
             {(trades ?? []).filter((t) => t.action !== "hold").length === 0 ? (
               <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>No executed trades yet. System is in {mode} mode.</p>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                     {["Pair","Side","Entry","Exit","P&L","Time","Status"].map((h) => (
-                      <th key={h} className="pb-2 text-left font-semibold pr-4" style={{ color: "var(--text-secondary)" }}>{h}</th>
+                      <th key={h} className="pb-2 text-left font-semibold pr-4 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {(trades ?? []).filter((t) => t.action !== "hold").slice(0, 20).map((t) => (
                     <tr key={t.id} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                      <td className="py-2 pr-4 font-semibold" style={{ color: "var(--text-primary)" }}>{t.instrument ?? "—"}</td>
+                      <td className="py-2 pr-4 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{t.instrument ?? "—"}</td>
                       <td className="py-2 pr-4 font-bold" style={{ color: (t.direction ?? t.action) === "long" ? "var(--color-bull)" : "var(--color-bear)" }}>
                         {(t.direction ?? t.action ?? "—").toUpperCase()}
                       </td>
@@ -547,6 +550,7 @@ export default function AutonomousPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </>
@@ -564,18 +568,19 @@ export default function AutonomousPage() {
           {patternStats.length === 0 ? (
             <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>No trade history yet to evaluate patterns.</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                   {["Pattern", "Win Rate", "Avg P&L", "Trades", "Status", "Deploy"].map((h) => (
-                    <th key={h} className="pb-2 text-left font-semibold pr-4" style={{ color: "var(--text-secondary)" }}>{h}</th>
+                    <th key={h} className="pb-2 text-left font-semibold pr-4 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {[...patternStats].sort((a, b) => Number(a.untraded) - Number(b.untraded) || b.total_trades - a.total_trades).map((p) => (
                   <tr key={p.pattern_type} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                    <td className="py-2 pr-4 font-semibold" style={{ color: "var(--text-primary)" }}>{PATTERN_LABELS[p.pattern_type] ?? p.pattern_type}</td>
+                    <td className="py-2 pr-4 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{PATTERN_LABELS[p.pattern_type] ?? p.pattern_type}</td>
                     <td className="py-2 pr-4 font-mono font-bold" style={{ color: p.untraded ? "var(--text-muted)" : p.win_rate >= 50 ? "var(--color-bull)" : "var(--color-bear)" }}>
                       {p.untraded ? "—" : `${p.win_rate.toFixed(0)}%`}
                     </td>
@@ -600,6 +605,7 @@ export default function AutonomousPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -613,7 +619,7 @@ export default function AutonomousPage() {
           {!riskProfile ? (
             <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Loading risk profile…</p>
           ) : (
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
                 { label: "Stop trading if daily loss exceeds", key: "daily_loss_limit_pct" as const, suffix: "%", min: 0.5, max: 20, step: 0.5 },
                 { label: "Pause after consecutive losses",     key: "consecutive_loss_limit" as const, suffix: "trades", min: 1, max: 20, step: 1 },
@@ -622,7 +628,7 @@ export default function AutonomousPage() {
                 { label: "Max concurrent open trades",          key: "max_concurrent_trades" as const, suffix: "trades", min: 1, max: 10, step: 1 },
                 { label: "Minimum risk:reward ratio",           key: "min_rr_ratio" as const, suffix: "R", min: 0.5, max: 10, step: 0.1 },
               ].map((r) => (
-                <div key={r.key} className="flex items-center justify-between rounded-lg p-3"
+                <div key={r.key} className="flex items-center justify-between gap-2 rounded-lg p-3"
                   style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
                   <div>
                     <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{r.label}</div>
@@ -642,25 +648,27 @@ export default function AutonomousPage() {
 
       {activeTab === "Logs" && (
         <div className="card">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
             <span className="section-label">Decision Logs</span>
-            <div className="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
+            <div className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 w-full sm:w-auto" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>
               <Search size={12} style={{ color: "var(--text-muted)" }} />
               <input
                 value={logFilter} onChange={(e) => setLogFilter(e.target.value)}
                 placeholder="Filter by instrument, status, reason…"
-                style={{ background: "transparent", border: "none", outline: "none", color: "var(--text-primary)", fontSize: "var(--text-xs)", width: 240 }}
+                style={{ background: "transparent", border: "none", outline: "none", color: "var(--text-primary)", fontSize: "var(--text-xs)", width: "100%", minWidth: 160 }}
+                className="sm:w-[240px]"
               />
             </div>
           </div>
           {filteredLogs.length === 0 ? (
             <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>No decision logs match.</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                   {["Time", "Instrument", "Status", "Setup Score", "Detail"].map((h) => (
-                    <th key={h} className="pb-2 text-left font-semibold pr-4" style={{ color: "var(--text-secondary)" }}>{h}</th>
+                    <th key={h} className="pb-2 text-left font-semibold pr-4 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -668,7 +676,7 @@ export default function AutonomousPage() {
                 {filteredLogs.slice(0, 150).map((t) => (
                   <tr key={t.id} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                     <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{timeAgo(t.created_at)}</td>
-                    <td className="py-2 pr-4 font-semibold" style={{ color: "var(--text-primary)" }}>{t.instrument ?? "—"}</td>
+                    <td className="py-2 pr-4 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{t.instrument ?? "—"}</td>
                     <td className="py-2 pr-4">
                       <span className="font-semibold" style={{ color: statusColor(t.status) }}>{t.status ?? "—"}</span>
                     </td>
@@ -678,6 +686,7 @@ export default function AutonomousPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}

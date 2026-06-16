@@ -140,7 +140,7 @@ export default function PositionCard({
         <div className="mt-3">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-semibold text-purple-400 hover:text-purple-300"
+            className="flex items-center gap-1 py-2 text-xs font-semibold text-purple-400 hover:text-purple-300"
           >
             Why did AI enter?
             {showReasoning ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -157,14 +157,14 @@ export default function PositionCard({
               <p className="text-sm text-zinc-300">{relatedTrade.reasoning}</p>
               <button
                 onClick={() => setShowBull(!showBull)}
-                className="block text-xs font-semibold text-green-500"
+                className="block py-1.5 text-xs font-semibold text-green-500"
               >
                 🐂 Bull case {showBull ? "▲" : "▼"}
               </button>
               {showBull && <p className="text-xs text-zinc-400">{relatedTrade.bull_case}</p>}
               <button
                 onClick={() => setShowBear(!showBear)}
-                className="block text-xs font-semibold text-red-500"
+                className="block py-1.5 text-xs font-semibold text-red-500"
               >
                 🐻 Bear case {showBear ? "▲" : "▼"}
               </button>

@@ -186,9 +186,9 @@ export default function DashboardPage() {
 
   return (
     <>
-    <div className="flex gap-3" style={{ height: "calc(100vh - var(--topbar-height) - 48px)" }}>
+    <div className="flex flex-col md:flex-row gap-3 md:h-[calc(100vh-var(--topbar-height)-48px)]">
       {/* ── LEFT PANEL ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3 overflow-y-auto" style={{ width: 250, minWidth: 250 }}>
+      <div className="flex flex-col gap-3 overflow-y-auto order-2 md:order-1 w-full md:w-[250px] md:min-w-[250px]">
         {/* Market Narrative */}
         <div className="card">
           <div className="section-label mb-2">Market Narrative</div>
@@ -296,7 +296,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── CENTER ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3 flex-1 min-w-0 overflow-hidden">
+      <div className="flex flex-col gap-3 flex-1 min-w-0 overflow-hidden order-1 md:order-2 w-full">
         {instrument.symbol !== "BTCUSD" && (
           <div className="rounded-lg px-3 py-1.5" style={{ background: "rgba(255,184,77,0.08)", border: "1px solid rgba(255,184,77,0.25)" }}>
             <span style={{ fontSize: "var(--text-xs)", color: "var(--color-neutral)" }}>
@@ -307,7 +307,7 @@ export default function DashboardPage() {
         <TVChart key={instrument.tvSymbol} symbol={instrument.tvSymbol} height={instrument.symbol !== "BTCUSD" ? 400 : 440} interval="15" />
 
         {/* Bottom strip */}
-        <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {/* Open Position */}
           <div className="card" style={{ padding: "var(--space-3)" }}>
             <div className="flex items-center gap-2 mb-2">
@@ -481,8 +481,8 @@ export default function DashboardPage() {
       </div>
 
       {/* ── RIGHT PANEL: AI Trade Setup ─────────────────────────────────────── */}
-      <div className="flex flex-col overflow-y-auto"
-        style={{ width: 280, minWidth: 280, background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-4)" }}>
+      <div className="flex flex-col overflow-y-auto order-3 w-full md:w-[280px] md:min-w-[280px]"
+        style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-4)" }}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", fontWeight: 700, letterSpacing: "0.08em" }}>AI TRADE SETUP</span>

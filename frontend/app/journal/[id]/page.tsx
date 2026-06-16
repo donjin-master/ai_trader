@@ -133,9 +133,9 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
   const totalPages = Math.max(1, Math.ceil(trades.length / PAGE_SIZE));
 
   return (
-    <div className="flex gap-3" style={{ height: "calc(100vh - var(--topbar-height) - 48px)" }}>
-      {/* Left: trade list */}
-      <div className="flex flex-col overflow-hidden" style={{ width: 300, minWidth: 300, background: "var(--bg-surface)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)" }}>
+    <div className="flex flex-col md:flex-row gap-3 md:h-[calc(100vh-var(--topbar-height)-48px)]">
+      {/* Left: trade list (hidden on mobile — use the Journal page list or the Back link below instead) */}
+      <div className="hidden md:flex flex-col overflow-hidden md:w-[300px] md:min-w-[300px]" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)" }}>
         <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
           <span className="font-mono font-bold" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
             {trades.length} TRADES
@@ -194,7 +194,7 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
       </div>
 
       {/* Right: detail */}
-      <div className="flex flex-col flex-1 overflow-hidden" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)" }}>
+      <div className="flex flex-col flex-1 w-full overflow-hidden" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)" }}>
         <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
           <span className="font-bold" style={{ fontSize: "var(--text-lg)", color: "var(--text-primary)" }}>
             TRADE #{selected.id.slice(0, 6)} {selected.instrument} {(selected.direction ?? selected.action ?? "").toUpperCase()}
@@ -216,7 +216,7 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
         <div className="flex-1 overflow-y-auto p-4">
           {activeTab === "Overview" && (
             <>
-              <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Left block */}
                 <div className="flex flex-col gap-3">
                   <div className="card">
@@ -414,7 +414,7 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
 
           {activeTab === "AI Analysis" && (
             <div className="flex flex-col gap-4">
-              <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="card">
                   <div className="section-label mb-2">AI Reasoning & Signals</div>
                   <p style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)", whiteSpace: "pre-wrap", marginBottom: 12, lineHeight: 1.5 }}>
@@ -554,7 +554,7 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
                 </div>
               ) : (
                 <div className="card">
-                  <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                     {[
                       { label: "Thesis Correct", value: selected.reflection.thesis_correct === true ? "Yes" : selected.reflection.thesis_correct === false ? "No" : "—" },
                       { label: "Execution Quality", value: selected.reflection.execution_quality != null ? `${selected.reflection.execution_quality}/10` : "—" },
@@ -590,6 +590,7 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
                     <p style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)", marginBottom: 10 }}>{selected.counterfactuals.key_insight}</p>
                   )}
                   {selected.counterfactuals.scenarios && selected.counterfactuals.scenarios.length > 0 && (
+                    <div className="overflow-x-auto">
                     <table className="w-full" style={{ fontSize: "var(--text-xs)" }}>
                       <thead><tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>{["Scenario", "Simulated P&L", "Better?", "Leading Indicator"].map((h) => <th key={h} className="pb-2 text-left font-semibold pr-3" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr></thead>
                       <tbody>
@@ -603,6 +604,7 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </div>
               )}
