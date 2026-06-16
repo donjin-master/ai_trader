@@ -196,9 +196,8 @@ async def verify_api_key(x_api_secret: str = Header(None)):
 
 app = FastAPI(title="AI Trader", lifespan=lifespan, dependencies=[Depends(verify_api_key)])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def _build_allowed_origins() -> list[str]:
+    origins = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
@@ -207,7 +206,20 @@ app.add_middleware(
         "http://127.0.0.1:3002",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-    ] + ([os.getenv("FRONTEND_URL")] if os.getenv("FRONTEND_URL") else []),
+    ]
+    # Support multiple comma-separated URLs in FRONTEND_URL env var
+    frontend_urls = os.getenv("FRONTEND_URL", "")
+    for url in frontend_urls.split(","):
+        url = url.strip()
+        if url:
+            origins.append(url)
+    return origins
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_build_allowed_origins(),
+    allow_origin_regex=r"https://.*\.vercel\.app",  # allow all Vercel preview deployments
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

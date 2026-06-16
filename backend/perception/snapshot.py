@@ -11,6 +11,11 @@ from backend.delta.client import DeltaClient
 FEAR_GREED_URL = "https://api.alternative.me/fng/?limit=1"
 COINGECKO_GLOBAL_URL = "https://api.coingecko.com/api/v3/global"
 
+# Module-level TTL caches to avoid hitting external APIs on every snapshot request
+_FEAR_GREED_CACHE: dict[str, Any] = {}
+_BTC_DOMINANCE_CACHE: dict[str, Any] = {}
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+
 
 def _to_float(value: Any) -> float | None:
     try:
@@ -26,29 +31,39 @@ class MarketSnapshot:
         self.delta = delta_client
 
     async def _fetch_fear_greed(self) -> dict[str, Any]:
+        cached = _FEAR_GREED_CACHE.get("data")
+        if cached and (datetime.now(timezone.utc) - cached["fetched_at"]).total_seconds() < _CACHE_TTL_SECONDS:
+            return cached["value"]
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(FEAR_GREED_URL)
                 response.raise_for_status()
                 entry = response.json()["data"][0]
-                return {
+                result = {
                     "fear_greed_index": int(entry["value"]),
                     "fear_greed_classification": entry["value_classification"],
                 }
+                _FEAR_GREED_CACHE["data"] = {"value": result, "fetched_at": datetime.now(timezone.utc)}
+                return result
         except Exception as exc:
             logger.warning("Fear & Greed API failed: {}", exc)
-            return {"fear_greed_index": None, "fear_greed_classification": None}
+            return cached["value"] if cached else {"fear_greed_index": None, "fear_greed_classification": None}
 
     async def _fetch_btc_dominance(self) -> dict[str, Any]:
+        cached = _BTC_DOMINANCE_CACHE.get("data")
+        if cached and (datetime.now(timezone.utc) - cached["fetched_at"]).total_seconds() < _CACHE_TTL_SECONDS:
+            return cached["value"]
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(COINGECKO_GLOBAL_URL)
                 response.raise_for_status()
                 market_cap_pct = response.json()["data"]["market_cap_percentage"]
-                return {"btc_dominance": round(float(market_cap_pct["btc"]), 2)}
+                result = {"btc_dominance": round(float(market_cap_pct["btc"]), 2)}
+                _BTC_DOMINANCE_CACHE["data"] = {"value": result, "fetched_at": datetime.now(timezone.utc)}
+                return result
         except Exception as exc:
             logger.warning("CoinGecko global API failed: {}", exc)
-            return {"btc_dominance": None}
+            return cached["value"] if cached else {"btc_dominance": None}
 
     @staticmethod
     def _market_regime(change_24h_pct: float | None) -> str:
