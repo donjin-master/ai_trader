@@ -1,17 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import useSWR from "swr";
-import { Bell, ChevronDown, Zap, Info, Bitcoin, X } from "lucide-react";
+import { Bell, ChevronDown, Zap, Info, X } from "lucide-react";
 import { api, type Snapshot } from "@/lib/api";
 import { ManualTradePanel } from "./ManualTradePanel";
+import { useInstrument } from "@/lib/instrument";
+import { useOnClickOutside } from "@/lib/useOnClickOutside";
 
 const POLL = { refreshInterval: 15_000 };
 
 export default function TopBar() {
-  const { data: snap } = useSWR<Snapshot | null>("snap-btc", () => api.snapshot("BTCUSD"), POLL);
-  const [pair] = useState("BTC/USDT");
+  const { instrument, setInstrumentSymbol, instruments } = useInstrument();
+  const { data: snap } = useSWR<Snapshot | null>(
+    `snap-${instrument.symbol}`, () => api.snapshot(instrument.symbol), POLL
+  );
   const [showQuickTrade, setShowQuickTrade] = useState(false);
+  const [showPairMenu, setShowPairMenu] = useState(false);
+  const pairMenuRef = useRef<HTMLDivElement>(null);
+  useOnClickOutside(pairMenuRef, () => setShowPairMenu(false));
 
   const price    = snap?.price ?? 0;
   const change   = snap?.change_24h_pct ?? 0;
@@ -49,14 +56,41 @@ export default function TopBar() {
       <div className="h-6 w-px" style={{ background: "var(--border-default)" }} />
 
       {/* Pair selector */}
-      <button type="button" className="flex items-center gap-2 rounded-lg px-3 py-1.5 transition-all"
-        style={{ background: "var(--bg-input)", border: "1px solid var(--border-default)" }}>
-        <div className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: "#f7931a20" }}>
-          <Bitcoin size={12} style={{ color: "#f7931a" }} />
-        </div>
-        <span className="font-semibold" style={{ fontSize: "var(--text-md)", color: "var(--text-primary)" }}>{pair}</span>
-        <ChevronDown size={13} style={{ color: "var(--text-secondary)" }} />
-      </button>
+      <div className="relative" ref={pairMenuRef}>
+        <button type="button" onClick={() => setShowPairMenu((v) => !v)}
+          className="flex items-center gap-2 rounded-lg px-3 py-1.5 transition-all hover:opacity-90"
+          style={{ background: "var(--bg-input)", border: "1px solid var(--border-default)" }}>
+          <div className="flex h-5 w-5 items-center justify-center rounded-full font-bold"
+            style={{ background: `${instrument.color}20`, color: instrument.color, fontSize: 10 }}>
+            {instrument.glyph}
+          </div>
+          <span className="font-semibold" style={{ fontSize: "var(--text-md)", color: "var(--text-primary)" }}>{instrument.label}</span>
+          <ChevronDown size={13} style={{ color: "var(--text-secondary)" }} />
+        </button>
+
+        {showPairMenu && (
+          <div className="absolute left-0 top-full mt-1 rounded-lg overflow-hidden z-50"
+            style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)", boxShadow: "var(--shadow-panel)", minWidth: 160 }}>
+            {instruments.map((inst) => (
+              <button
+                key={inst.symbol}
+                type="button"
+                onClick={() => { setInstrumentSymbol(inst.symbol); setShowPairMenu(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-all hover:opacity-90"
+                style={{
+                  background: inst.symbol === instrument.symbol ? "var(--bg-hover)" : "transparent",
+                }}
+              >
+                <div className="flex h-5 w-5 items-center justify-center rounded-full font-bold"
+                  style={{ background: `${inst.color}20`, color: inst.color, fontSize: 10 }}>
+                  {inst.glyph}
+                </div>
+                <span className="font-semibold" style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>{inst.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Price + change */}
       <div className="flex items-baseline gap-2">
@@ -127,7 +161,11 @@ export default function TopBar() {
           >
             <X size={14} />
           </button>
-          <ManualTradePanel currentPrice={price} onClose={() => setShowQuickTrade(false)} />
+          <ManualTradePanel
+            currentPrice={price}
+            onClose={() => setShowQuickTrade(false)}
+            defaultInstrument={`${instrument.symbol}_PERP`}
+          />
         </div>
       </div>
     )}

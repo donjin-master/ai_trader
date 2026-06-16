@@ -64,13 +64,15 @@ const LEVERAGE_PRESETS = [5, 10, 20, 50, 100];
 export function ManualTradePanel({
   currentPrice,
   onClose,
+  defaultInstrument = "BTCUSD_PERP",
 }: {
   currentPrice: number;
   onClose: () => void;
+  defaultInstrument?: string;
 }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ManualTradeForm>({
-    instrument: "BTCUSD_PERP",
+    instrument: defaultInstrument,
     direction: "long",
     entryType: "market",
     entryPrice: currentPrice > 0 ? currentPrice.toFixed(1) : "",

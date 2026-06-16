@@ -9,6 +9,7 @@ import { Info, Shield } from "lucide-react";
 import { api, API_HEADERS, type Snapshot, type Status, type Watching, type Position, type ManagedPositionState, type KeyLevels } from "@/lib/api";
 import { mockData } from "@/lib/mockData";
 import TVChart from "@/components/TVChart";
+import { useInstrument } from "@/lib/instrument";
 
 const POLL = { refreshInterval: 15_000 };
 
@@ -88,6 +89,7 @@ function TradeSlider({ entry, sl, tp1, tp2, current }: { entry: number; sl: numb
 }
 
 export default function DashboardPage() {
+  const { instrument } = useInstrument();
   const { data: snap }      = useSWR<Snapshot | null>("snap-btc",  () => api.snapshot("BTCUSD"),  POLL);
   const { data: status }    = useSWR<Status | null>("status",      () => api.status(),             POLL);
   const { data: watching }  = useSWR<Watching | null>("watching",  () => api.watching(),           POLL);
@@ -295,7 +297,14 @@ export default function DashboardPage() {
 
       {/* ── CENTER ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 flex-1 min-w-0 overflow-hidden">
-        <TVChart symbol="DELTAIN:BTCUSD.P" height={440} interval="15" />
+        {instrument.symbol !== "BTCUSD" && (
+          <div className="rounded-lg px-3 py-1.5" style={{ background: "rgba(255,184,77,0.08)", border: "1px solid rgba(255,184,77,0.25)" }}>
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--color-neutral)" }}>
+              Viewing {instrument.label} chart — AI decisions, key levels &amp; positions below are for BTCUSD (the engine's active instrument).
+            </span>
+          </div>
+        )}
+        <TVChart key={instrument.tvSymbol} symbol={instrument.tvSymbol} height={instrument.symbol !== "BTCUSD" ? 400 : 440} interval="15" />
 
         {/* Bottom strip */}
         <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>

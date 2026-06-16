@@ -4,6 +4,7 @@ import QueryProvider from "@/components/QueryProvider";
 import SideNav from "@/components/SideNav";
 import TopBar from "@/components/TopBar";
 import { Providers } from "./providers";
+import { InstrumentProvider } from "@/lib/instrument";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -20,19 +21,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${inter.variable} ${jetbrainsMono.variable}`}>
         <Providers>
           <QueryProvider>
-            <TopBar />
-            <SideNav />
-            <main
-              style={{
-                marginLeft: "var(--sidebar-width)",
-                marginTop: "var(--topbar-height)",
-                padding: "var(--space-6)",
-                minHeight: "calc(100vh - var(--topbar-height))",
-                background: "var(--bg-base)",
-              }}
-            >
-              {children}
-            </main>
+            <InstrumentProvider>
+              <TopBar />
+              <SideNav />
+              <main
+                style={{
+                  marginLeft: "var(--sidebar-width)",
+                  marginTop: "var(--topbar-height)",
+                  padding: "var(--space-6)",
+                  minHeight: "calc(100vh - var(--topbar-height))",
+                  background: "var(--bg-base)",
+                }}
+              >
+                {children}
+              </main>
+            </InstrumentProvider>
           </QueryProvider>
         </Providers>
       </body>
