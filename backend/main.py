@@ -2122,6 +2122,12 @@ async def get_pattern_stats() -> list[dict]:
         )
         traded = [dict(r._mapping) for r in rows.all()]
 
+    # asyncpg returns ROUND/AVG results as Decimal — coerce to float/None for JSON serialisation
+    for r in traded:
+        r["win_rate"] = float(r["win_rate"]) if r["win_rate"] is not None else None
+        r["avg_pnl_pct"] = float(r["avg_pnl_pct"]) if r["avg_pnl_pct"] is not None else None
+        r["avg_confidence"] = float(r["avg_confidence"]) if r["avg_confidence"] is not None else None
+
     profile = await risk_manager.get_profile()
     enabled_patterns = profile.get("enabled_patterns") or []
     seen = {r["pattern_type"] for r in traded}
