@@ -71,8 +71,11 @@ async def _safe_pending_orders() -> None:
 
 async def _safe_snapshot_storage() -> None:
     from backend.ai.loops import store_market_snapshot
+    from backend.execution.risk_profile import risk_manager
     try:
-        for instrument in ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]:
+        profile = await risk_manager.get_profile()
+        instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]
+        for instrument in instruments:
             await store_market_snapshot(instrument)
     except Exception:
         logger.exception("Snapshot storage crashed")
@@ -88,15 +91,18 @@ async def _safe_counterfactual() -> None:
 
 async def _refresh_key_levels() -> None:
     from backend.perception.key_levels import key_levels_engine
+    from backend.execution.risk_profile import risk_manager
     if _stream_processor is None:
         return
-    for instrument in ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]:
-        try:
+    try:
+        profile = await risk_manager.get_profile()
+        instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]
+        for instrument in instruments:
             levels = await key_levels_engine.compute(instrument, 0)
             _stream_processor.update_key_levels(instrument, levels)
             logger.info("Key levels refreshed for {}", instrument)
-        except Exception:
-            logger.exception("Key levels refresh failed for {}", instrument)
+    except Exception:
+        logger.exception("Key levels refresh failed")
 
 
 async def _safe_daily_reset() -> None:

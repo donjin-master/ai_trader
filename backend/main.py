@@ -151,9 +151,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from backend.websocket.analysis_dispatcher import analysis_dispatcher as _dispatcher
         from backend.cache import _registry
 
+        from backend.execution.risk_profile import risk_manager
+        profile = await risk_manager.get_profile()
+        active_instruments = profile.get("active_instruments") or ["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"]
+
         _event_router = _EventRouter(dispatcher=_dispatcher)
         _stream_processor = MarketStreamProcessor(
-            instruments=["BTCUSD_PERP", "ETHUSD_PERP", "SOLUSD_PERP"],
+            instruments=active_instruments,
             event_router=_event_router,
             cache_registry=_registry,
         )

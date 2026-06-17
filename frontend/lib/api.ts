@@ -455,6 +455,7 @@ export const api = {
     }),
   labStressTest: (config: Record<string, unknown>) =>
     post<LabStressTest>("/api/lab/stress-test", config),
+  optionsPositions: () => get<unknown[]>("/api/options/positions"),
 };
 
 // ── V1.2 types ──────────────────────────────────────────────────────────────
