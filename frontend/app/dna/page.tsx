@@ -99,9 +99,9 @@ export default function DnaPage() {
   const { data: rawPatternStats } = useSWR<PatternStat[] | null>("patterns-stats-dna", () => api.patternStats(), POLL);
   const patternStats = rawPatternStats ?? [];
 
-  const allBestSetups = patternStats.length > 0 ? patternStats.filter((p) => p.win_rate >= 50 && p.avg_pnl_pct > 0)
-    .sort((a,b) => b.avg_pnl_pct - a.avg_pnl_pct)
-    .map((p) => ({ setup: p.pattern_type, winRate: Math.round(p.win_rate), expectancy: Number(p.avg_pnl_pct ?? 0), pf: p.avg_pnl_pct > 0 ? 1.5 : 0.8, trades: p.total_trades }))
+  const allBestSetups = patternStats.length > 0 ? patternStats.filter((p) => (p.win_rate ?? 0) >= 50 && (p.avg_pnl_pct ?? 0) > 0)
+    .sort((a,b) => (b.avg_pnl_pct ?? 0) - (a.avg_pnl_pct ?? 0))
+    .map((p) => ({ setup: p.pattern_type, winRate: Math.round(p.win_rate ?? 0), expectancy: Number(p.avg_pnl_pct ?? 0), pf: (p.avg_pnl_pct ?? 0) > 0 ? 1.5 : 0.8, trades: p.total_trades }))
     : [
       { setup: "London Open Breakout",    winRate: 73, expectancy: 2.41, pf: 2.1,  trades: 22 },
       { setup: "SMC Bullish BOS",         winRate: 68, expectancy: 1.89, pf: 1.9,  trades: 34 },
@@ -109,9 +109,9 @@ export default function DnaPage() {
       { setup: "Trend Continuation",      winRate: 63, expectancy: 1.60, pf: 1.6,  trades: 12 },
     ];
 
-  const allWorstSetups = patternStats.length > 0 ? patternStats.filter((p) => p.win_rate < 50 || p.avg_pnl_pct < 0)
-    .sort((a,b) => a.avg_pnl_pct - b.avg_pnl_pct)
-    .map((p) => ({ setup: p.pattern_type, winRate: Math.round(p.win_rate), expectancy: Number(p.avg_pnl_pct ?? 0), pf: p.avg_pnl_pct > 0 ? 1.5 : 0.8, trades: p.total_trades }))
+  const allWorstSetups = patternStats.length > 0 ? patternStats.filter((p) => (p.win_rate ?? 0) < 50 || (p.avg_pnl_pct ?? 0) < 0)
+    .sort((a,b) => (a.avg_pnl_pct ?? 0) - (b.avg_pnl_pct ?? 0))
+    .map((p) => ({ setup: p.pattern_type, winRate: Math.round(p.win_rate ?? 0), expectancy: Number(p.avg_pnl_pct ?? 0), pf: (p.avg_pnl_pct ?? 0) > 0 ? 1.5 : 0.8, trades: p.total_trades }))
     : [
       { setup: "Asia Session Scalp",      winRate: 32, expectancy: -1.10, pf: 0.7, trades: 15 },
       { setup: "Friday Volume Fade",      winRate: 37, expectancy: -0.87, pf: 0.8, trades: 11 },

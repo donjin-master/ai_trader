@@ -410,31 +410,16 @@ async def run_decision_loop(
     if trigger_context and isinstance(market_context, str):
         market_context = f"{trigger_context}\n\n{market_context}"
 
-    if not forced_boardroom and smc_analysis:
-        logger.info("Using mathematical SMC decision for {} (Bypassing Boardroom LLM)", instrument)
-        score = smc_analysis.get("raw_score_pre_boardroom", {}).get("score", 0)
-        action_val = smc_analysis.get("raw_score_pre_boardroom", {}).get("bias", "hold")
-        
-        decision = {
-            "action": action_val,
-            "confidence": int(score),
-            "reasoning": f"Mathematical SMC Setup. Score: {score}/10. (Boardroom LLM bypassed to save API costs)",
-            "boardroom": [],
-            "size": smc_analysis.get("recommended_size", 0.5),
-            "stop_loss": smc_analysis.get("stop_loss", 0),
-            "take_profit_1": smc_analysis.get("take_profit_1", 0)
-        }
-    else:
-        logger.info("Running LLM Boardroom for {}", instrument)
-        decision = await agents.run_boardroom(
-            instrument=instrument,
-            market_snapshot=market_context,
-            portfolio_state=portfolio,
-            recent_lessons=lessons,
-            counterfactual_insights=insights,
-            chart_15m_b64=chart_15m["image_base64"] if send_charts else None,
-            chart_1h_b64=chart_1h["image_base64"] if (send_charts and chart_1h) else None,
-        )
+    logger.info("Running LLM Boardroom for {}", instrument)
+    decision = await agents.run_boardroom(
+        instrument=instrument,
+        market_snapshot=market_context,
+        portfolio_state=portfolio,
+        recent_lessons=lessons,
+        counterfactual_insights=insights,
+        chart_15m_b64=chart_15m["image_base64"] if send_charts else None,
+        chart_1h_b64=chart_1h["image_base64"] if (send_charts and chart_1h) else None,
+    )
     decision.setdefault("instrument", instrument)
     action = decision.get("action", "hold")
 

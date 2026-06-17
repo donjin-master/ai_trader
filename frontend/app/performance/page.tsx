@@ -7,7 +7,6 @@ import {
 } from "recharts";
 import { TrendingUp, Download } from "lucide-react";
 import { api, type DnaReport } from "@/lib/api";
-import { mockData } from "@/lib/mockData";
 
 const POLL = { refreshInterval: 60_000 };
 const PERIODS = ["7D", "30D", "90D", "All Time"];

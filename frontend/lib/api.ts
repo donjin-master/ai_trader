@@ -375,8 +375,8 @@ export interface KeyLevels {
 export interface PatternStat {
   pattern_type: string;
   total_trades: number;
-  win_rate: number;
-  avg_pnl_pct: number;
+  win_rate: number | null;
+  avg_pnl_pct: number | null;
   avg_confidence: number | null;
   enabled: boolean;
   untraded: boolean;
@@ -442,7 +442,17 @@ export const api = {
       return null;
     }
   },
-  patternStats: () => get<PatternStat[]>("/api/patterns/stats"),
+  patternStats: () =>
+    get<PatternStat[]>("/api/patterns/stats").then(
+      (data) =>
+        data?.map((p) => ({
+          ...p,
+          // asyncpg returns ROUND/AVG as Decimal → FastAPI serialises as string; coerce to number
+          win_rate: p.win_rate != null ? Number(p.win_rate) : null,
+          avg_pnl_pct: p.avg_pnl_pct != null ? Number(p.avg_pnl_pct) : null,
+          avg_confidence: p.avg_confidence != null ? Number(p.avg_confidence) : null,
+        })) ?? null,
+    ),
   togglePattern: (patternType: string, enabled: boolean) =>
     post<{ pattern_type: string; enabled: boolean; enabled_patterns: string[] }>(
       `/api/patterns/${patternType}/toggle`, { enabled }
@@ -455,6 +465,7 @@ export const api = {
     }),
   labStressTest: (config: Record<string, unknown>) =>
     post<LabStressTest>("/api/lab/stress-test", config),
+  optionsPositions: () => get<unknown[]>("/api/options/positions"),
 };
 
 // ── V1.2 types ──────────────────────────────────────────────────────────────
