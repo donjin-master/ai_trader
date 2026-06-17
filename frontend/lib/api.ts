@@ -375,8 +375,8 @@ export interface KeyLevels {
 export interface PatternStat {
   pattern_type: string;
   total_trades: number;
-  win_rate: number;
-  avg_pnl_pct: number;
+  win_rate: number | null;
+  avg_pnl_pct: number | null;
   avg_confidence: number | null;
   enabled: boolean;
   untraded: boolean;

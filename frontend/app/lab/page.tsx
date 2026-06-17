@@ -358,8 +358,8 @@ export default function LabPage() {
               <>
                 <div className="font-bold" style={{ fontSize: "var(--text-lg)", color: "var(--text-primary)" }}>{selected.pattern_type}</div>
                 <StatGrid items={[
-                  { label: "Win Rate", value: `${selected.win_rate.toFixed(1)}%`, color: selected.win_rate >= 50 ? "var(--color-bull)" : "var(--color-bear)" },
-                  { label: "Avg P&L", value: pct(selected.avg_pnl_pct), color: selected.avg_pnl_pct >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
+                  { label: "Win Rate", value: `${(selected.win_rate ?? 0).toFixed(1)}%`, color: (selected.win_rate ?? 0) >= 50 ? "var(--color-bull)" : "var(--color-bear)" },
+                  { label: "Avg P&L", value: pct(selected.avg_pnl_pct), color: (selected.avg_pnl_pct ?? 0) >= 0 ? "var(--color-bull)" : "var(--color-bear)" },
                   { label: "Total Trades", value: String(selected.total_trades) },
                   { label: "Avg Confidence", value: selected.avg_confidence != null ? `${selected.avg_confidence.toFixed(1)}/10` : "—" },
                   { label: "Deployed", value: selected.enabled ? "Yes" : "No", color: selected.enabled ? "var(--color-bull)" : "var(--text-muted)" },
@@ -369,8 +369,8 @@ export default function LabPage() {
                   <div className="flex items-center gap-4">
                     <PieChart width={80} height={80}>
                       <Pie data={[
-                        { name: "Win", value: Math.round(selected.win_rate * selected.total_trades / 100), color: "var(--color-bull)" },
-                        { name: "Loss", value: selected.total_trades - Math.round(selected.win_rate * selected.total_trades / 100), color: "var(--color-bear)" },
+                        { name: "Win", value: Math.round((selected.win_rate ?? 0) * selected.total_trades / 100), color: "var(--color-bull)" },
+                        { name: "Loss", value: selected.total_trades - Math.round((selected.win_rate ?? 0) * selected.total_trades / 100), color: "var(--color-bear)" },
                       ]} cx={40} cy={40} innerRadius={24} outerRadius={38} dataKey="value" stroke="none" paddingAngle={2}>
                         {[{ color: "var(--color-bull)" }, { color: "var(--color-bear)" }].map((e, i) => <Cell key={i} fill={e.color} />)}
                       </Pie>
