@@ -328,7 +328,7 @@ export default function LabPage() {
                     contentStyle={{ background: "#141920", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
                     formatter={(_: unknown, __: string, props: any) => {
                       const d = props.payload;
-                      return [`${d.pattern_type}: ${pct(d.avg_pnl_pct)} / ${d.win_rate.toFixed(0)}% WR (${d.total_trades} trades)`, ""];
+                      return [`${d.pattern_type}: ${pct(d.avg_pnl_pct)} / ${(d.win_rate ?? 0).toFixed(0)}% WR (${d.total_trades} trades)`, ""];
                     }}
                   />
                   <Scatter
