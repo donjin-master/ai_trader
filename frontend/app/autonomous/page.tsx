@@ -431,7 +431,7 @@ export default function AutonomousPage() {
                         <div style={{ fontSize: "9px", color: "var(--text-muted)" }}>{p.total_trades} trades</div>
                       </div>
                       <div className="text-right">
-                        <div className="font-mono font-bold" style={{ fontSize: "var(--text-xs)", color: p.win_rate >= 50 ? "var(--color-bull)" : "var(--color-bear)" }}>{p.win_rate.toFixed(0)}%</div>
+                        <div className="font-mono font-bold" style={{ fontSize: "var(--text-xs)", color: (p.win_rate ?? 0) >= 50 ? "var(--color-bull)" : "var(--color-bear)" }}>{(p.win_rate ?? 0).toFixed(0)}%</div>
                         <span className="badge" style={{ fontSize: "9px", background: p.enabled ? "rgba(38,208,124,0.15)" : "rgba(255,255,255,0.06)", color: p.enabled ? "var(--color-bull)" : "var(--text-muted)" }}>
                           {p.enabled ? "Deployed" : "Not deployed"}
                         </span>
@@ -500,7 +500,7 @@ export default function AutonomousPage() {
                         <td className="py-2 pr-4 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{p.product_symbol}</td>
                         <td className="py-2 pr-4 font-bold" style={{ color: p.size > 0 ? "var(--color-bull)" : "var(--color-bear)" }}>{p.size > 0 ? "LONG" : "SHORT"}</td>
                         <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-primary)" }}>{Math.abs(p.size)}</td>
-                        <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-primary)" }}>{parseFloat(p.entry_price).toLocaleString()}</td>
+                        <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-primary)" }}>{p.entry_price ? parseFloat(p.entry_price).toLocaleString() : "—"}</td>
                         <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-primary)" }}>{p.mark_price ? parseFloat(p.mark_price).toLocaleString() : "—"}</td>
                         <td className="py-2 pr-4 font-mono font-bold" style={{ color: pnl >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>{pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}</td>
                         <td className="py-2 pr-4 font-mono" style={{ color: "var(--color-bear)" }}>{mp?.current_sl?.toLocaleString() ?? "—"}</td>
@@ -581,10 +581,10 @@ export default function AutonomousPage() {
                 {[...patternStats].sort((a, b) => Number(a.untraded) - Number(b.untraded) || b.total_trades - a.total_trades).map((p) => (
                   <tr key={p.pattern_type} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                     <td className="py-2 pr-4 font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{PATTERN_LABELS[p.pattern_type] ?? p.pattern_type}</td>
-                    <td className="py-2 pr-4 font-mono font-bold" style={{ color: p.untraded ? "var(--text-muted)" : p.win_rate >= 50 ? "var(--color-bull)" : "var(--color-bear)" }}>
-                      {p.untraded ? "—" : `${p.win_rate.toFixed(0)}%`}
+                    <td className="py-2 pr-4 font-mono font-bold" style={{ color: p.untraded ? "var(--text-muted)" : (p.win_rate ?? 0) >= 50 ? "var(--color-bull)" : "var(--color-bear)" }}>
+                      {p.untraded ? "—" : `${(p.win_rate ?? 0).toFixed(0)}%`}
                     </td>
-                    <td className="py-2 pr-4 font-mono font-bold" style={{ color: p.untraded ? "var(--text-muted)" : p.avg_pnl_pct >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
+                    <td className="py-2 pr-4 font-mono font-bold" style={{ color: p.untraded ? "var(--text-muted)" : (p.avg_pnl_pct ?? 0) >= 0 ? "var(--color-bull)" : "var(--color-bear)" }}>
                       {p.untraded ? "—" : pct(p.avg_pnl_pct)}
                     </td>
                     <td className="py-2 pr-4 font-mono" style={{ color: "var(--text-muted)" }}>{p.total_trades}</td>
